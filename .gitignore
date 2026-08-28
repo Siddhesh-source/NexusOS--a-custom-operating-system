@@ -1,0 +1,13 @@
+build/
+tools/limine/
+__pycache__/
+*.pyc
+.env
+*.img
+*.elf
+*.o
+qemu_*.txt
+debugcon.txt
+screen*.ppm
+screen*.png
+OVMF_VARS.fd
