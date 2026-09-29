@@ -12,6 +12,9 @@
  *   0xffffc00000000000 (KERNEL_HEAP_BASE)     kernel heap, grows upward to
  *                                             KERNEL_HEAP_BASE + KERNEL_HEAP_MAX
  *   0xffffd00000000000 (MM_TEST_VBASE)        scratch window for memory tests
+ *   0xffffe00000000000 (KSTACK_REGION_BASE)   kernel thread stacks, one slot
+ *                                             per thread, each with an
+ *                                             unmapped guard page below it
  *   0xffffffff80000000 +                      kernel image (text RX, rodata R,
  *                                             data/bss RW) as linked
  *
@@ -32,6 +35,7 @@
 #define KERNEL_HEAP_BASE    ((uint64_t)0xffffc00000000000)
 #define KERNEL_HEAP_MAX     ((uint64_t)256 << 20)         /* 256 MiB of address space */
 #define MM_TEST_VBASE       ((uint64_t)0xffffd00000000000)
+#define KSTACK_REGION_BASE  ((uint64_t)0xffffe00000000000)
 
 /* Physical memory region types, independent of the boot protocol. */
 enum mem_region_type {

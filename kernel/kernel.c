@@ -7,6 +7,9 @@
 #include "timer.h"
 #include "mm.h"
 #include "mm_test.h"
+#include "kstack.h"
+#include "proc.h"
+#include "proc_test.h"
 #include "kprintf.h"
 #include "cpu.h"
 
@@ -111,6 +114,10 @@ static void run_fault_demo(void)
 #elif defined(NEXUS_FAULT_DEMO_DF)
     kprintf("\n[demo] Testing double-fault exception...\n");
     test_double_fault();
+#elif defined(NEXUS_FAULT_DEMO_CTX)
+    proc_demo_corrupt_context();
+#elif defined(NEXUS_FAULT_DEMO_TSTACK)
+    proc_demo_thread_stack_overflow();
 #endif
 }
 
@@ -120,7 +127,7 @@ void kernel_main(void)
 
     serial_puts("\n============================================\n");
     serial_puts("            N E X U S   O S\n");
-    serial_puts("       Phase 3: Memory Management\n");
+    serial_puts("   Phase 4: Processes, Threads & Switching\n");
     serial_puts("============================================\n\n");
 
     serial_puts("[boot] CPU entered long mode (64-bit).\n");
@@ -173,13 +180,22 @@ void kernel_main(void)
     collect_boot_mem_info(&mem_info);
     mm_init(&mem_info);
 
-    bool tests_ok = mm_run_tests();
+    bool mm_ok = mm_run_tests();
+
+    /* Phase 4: processes, threads, context switching */
+    kstack_init();
+    proc_init();
+    bool proc_ok = proc_run_tests();
 
     serial_puts("\n[ok] Kernel started successfully.\n");
-    if (tests_ok)
+    if (mm_ok)
         serial_puts("[ok] Phase 3 memory management verified.\n");
     else
         serial_puts("[FAIL] Phase 3 memory tests reported failures.\n");
+    if (proc_ok)
+        serial_puts("[ok] Phase 4 process management verified.\n");
+    else
+        serial_puts("[FAIL] Phase 4 process tests reported failures.\n");
 
     run_fault_demo();
 

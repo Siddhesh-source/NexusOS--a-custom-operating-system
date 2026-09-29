@@ -7,22 +7,27 @@ and works identically on **Windows**, **Linux**, and **WSL**.
 ```
 ============================================
             N E X U S   O S
-       Phase 3: Memory Management
+   Phase 4: Processes, Threads & Switching
 ============================================
 
 [boot] CPU entered long mode (64-bit).
 [boot] Bootloader: Limine 12.6.1
 ...
 [pmm] Total physical memory :   523768 KiB
-[pmm] Usable memory         :   522636 KiB
 [vmm]   .text   0xffffffff80200000 - 0xffffffff80207000 -> phys 0x...  R-X
-[vmm]   HHDM    0xffff800000000000 - ...  RW-
 [heap] Kernel heap at 0xffffc00000000000, 64 KiB mapped, limit 256 MiB
-...
 [test] ===== 114 passed, 0 failed =====
+[kstack] 256 slots of 32 KiB (16 KiB stack + guard) at 0xffffe00000000000
+[proc] Kernel process PID 0 created; boot flow adopted as TID 0 ...
+[A] counter = 1  (TID 4, rsp in own stack)
+[B] counter = 101  (TID 5, rsp in own stack)
+[A] counter = 2  (TID 4, rsp in own stack)
+...
+[test] ===== 83 passed, 0 failed =====
 
 [ok] Kernel started successfully.
 [ok] Phase 3 memory management verified.
+[ok] Phase 4 process management verified.
 ```
 
 Implemented so far:
@@ -32,6 +37,10 @@ Implemented so far:
 - **Phase 3:** physical page-frame allocator, 4-level paging, virtual
   mapping API, kernel heap, page-fault reporting, and per-process address
   spaces. See [docs/memory-management.md](docs/memory-management.md).
+- **Phase 4:** processes and kernel threads, a per-thread kernel stack
+  with guard page and canary, x86-64 context switching, lifecycle and
+  reclamation, and a process/thread registry with diagnostics. No
+  scheduler yet. See [docs/process-model.md](docs/process-model.md).
 
 ## Prerequisites
 
@@ -86,12 +95,14 @@ On Linux/WSL you usually do **not** need a `.env` — everything is on `PATH`.
 python build.py            # compile kernel + build bootable image
 python build.py run        # boot in QEMU (BIOS, serial to stdout)
 python build.py run-uefi   # boot in QEMU (UEFI via OVMF)
-python build.py test       # build + boot + run memory self-tests
+python build.py test       # build + boot + run memory and process self-tests
 python build.py test-faults  # verify every fatal-exception demo is reported
 python build.py clean      # remove build artifacts
 
 python build.py run --fault-demo pf   # boot, then trigger a fatal page fault
-                                      # (also: null, stack, de, ud, df)
+                                      # (also: null, stack, de, ud, df,
+                                      #  ctx = corrupted thread context,
+                                      #  tstack = thread stack overflow)
 ```
 
 `python build.py test` exits `0` only if every boot-time check passes.
@@ -129,6 +140,12 @@ nexus/
 │   ├── pagefault.c/.h   # #PF reporting + probe fixups
 │   ├── probe.asm        # fault-tolerant memory probes for tests
 │   ├── mm_test.c/.h     # boot-time memory tests
+│   ├── kstack.c/.h      # kernel thread stacks (guard page + canary)
+│   ├── context.h/.asm   # CPU context layout + context_switch
+│   ├── proc.c/.h        # processes, threads, registry, thread_switch
+│   ├── proc_test.c/.h   # boot-time process/thread tests + summary panel
+│   ├── context_test.asm # register-preservation probe for tests
+│   ├── box.c/.h         # boxed diagnostic output
 │   ├── test_exception.c # deliberate fatal exceptions (fault demos)
 │   ├── kernel.h
 │   ├── linker.ld        # higher-half ELF linker script
@@ -146,7 +163,11 @@ nexus/
 5. GDT/TSS, IDT, and the timer come up and interrupts are enabled.
 6. The Limine memory map is handed to `mm_init()`, which starts the PMM,
    builds and loads the kernel's own page tables, and creates the heap.
-7. The memory self-tests run, and the kernel idles on `hlt`.
+7. The memory self-tests run.
+8. The stack allocator and process manager start, and the boot flow
+   becomes thread 0 of the kernel process (PID 0).
+9. The process/thread self-tests switch between real kernel threads, and
+   the kernel idles on `hlt`.
 
 ## Cross-platform notes
 

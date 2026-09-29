@@ -33,6 +33,7 @@ PMM/VMM are independent of the boot protocol.
 | `0xffff800000000000 + phys` | HHDM: direct map of RAM-backed physical memory | RW, NX, global |
 | `0xffffc00000000000` (+256 MiB) | kernel heap | RW, NX, global |
 | `0xffffd00000000000` | scratch window used by the memory tests | varies |
+| `0xffffe00000000000` | kernel thread stacks, 256 × 32 KiB slots, guard below each (Phase 4) | RW, NX, global |
 | `0xffffffff80200000` | kernel `.text` | R-X |
 | next page | kernel `.rodata` | R-- |
 | next page | kernel `.data` + `.bss` | RW- |

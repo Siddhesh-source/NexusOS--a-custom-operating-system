@@ -112,16 +112,18 @@ LDFLAGS = [
 ]
 
 C_SOURCES = [
-    "kernel.c", "serial.c", "panic.c", "kprintf.c", "string.c",
+    "kernel.c", "serial.c", "panic.c", "kprintf.c", "string.c", "box.c",
     # Phase 2: descriptor tables, exceptions, timer
     "gdt.c", "idt.c", "interrupts.c", "timer.c", "test_exception.c",
     # Phase 3: memory management
     "mm.c", "pmm.c", "vmm.c", "heap.c", "pagefault.c", "mm_test.c",
+    # Phase 4: processes, threads, context switching
+    "kstack.c", "proc.c", "proc_test.c",
 ]
-ASM_SOURCES = ["interrupt_asm.asm", "probe.asm"]
+ASM_SOURCES = ["interrupt_asm.asm", "probe.asm", "context.asm", "context_test.asm"]
 
 # Opt-in fatal exception demos (see run_fault_demo() in kernel.c).
-FAULT_DEMOS = ["pf", "null", "stack", "de", "ud", "df"]
+FAULT_DEMOS = ["pf", "null", "stack", "de", "ud", "df", "ctx", "tstack"]
 
 
 def build_kernel(fault_demo: str | None = None) -> Path:

@@ -242,6 +242,23 @@ vmm_status_t vmm_map_range(address_space_t *as, uint64_t virt, uint64_t phys,
     return VMM_OK;
 }
 
+vmm_status_t vmm_reserve_tables(address_space_t *as, uint64_t virt, uint64_t size)
+{
+    vmm_status_t st = check_virt(as, virt);
+    if (st != VMM_OK)
+        return st;
+
+    /* One walk per 2 MiB (one page table's worth) creates any missing
+     * PDPT/PD/PT on the way down. */
+    const uint64_t span = PAGE_SIZE * ENTRIES_PER_TABLE;
+    uint64_t end = virt + size;
+    for (uint64_t va = virt & ~(span - 1); va < end; va += span) {
+        if (walk(as, va, true, &st) == NULL)
+            return st;
+    }
+    return VMM_OK;
+}
+
 /* ---- address spaces ---------------------------------------------------- */
 
 vmm_status_t vmm_create_address_space(address_space_t *out)
@@ -446,6 +463,8 @@ const char *vmm_describe_address(uint64_t virt)
         return "kernel heap";
     if (virt >= MM_TEST_VBASE && virt < MM_TEST_VBASE + (1ULL << 39))
         return "memory-test window";
+    if (virt >= KSTACK_REGION_BASE && virt < KSTACK_REGION_BASE + (1ULL << 39))
+        return "kernel thread stack region (guard page or unused slot if unmapped)";
     if (virt >= hhdm_offset && virt < hhdm_offset + hhdm_limit)
         return "HHDM (direct physical map)";
     return "unmapped kernel space";

@@ -58,6 +58,11 @@ vmm_status_t vmm_protect_page(address_space_t *as, uint64_t virt, uint32_t flags
 vmm_status_t vmm_map_range(address_space_t *as, uint64_t virt, uint64_t phys,
                            uint64_t size, uint32_t flags);
 
+/* Make sure every page-table page needed to map [virt, virt+size) exists,
+ * without mapping anything. Lets a subsystem pay for its tables once at init
+ * so later map calls in that range cannot fail for lack of page tables. */
+vmm_status_t vmm_reserve_tables(address_space_t *as, uint64_t virt, uint64_t size);
+
 /* Create an address space: empty user half, shared kernel half. */
 vmm_status_t vmm_create_address_space(address_space_t *out);
 
