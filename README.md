@@ -1,194 +1,190 @@
+<div align="center">
+
 # NEXUS OS
 
-A minimal, portable x86-64 hobbyist kernel that boots on real hardware and
-in QEMU via the Limine v12.x boot protocol. The build system is pure Python
-and works identically on **Windows**, **Linux**, and **WSL**.
+**A from-scratch x86-64 operating system kernel, written in C and assembly.**
 
-```
-============================================
-            N E X U S   O S
-     Phase 5: Preemptive Scheduler
-============================================
+![Architecture](https://img.shields.io/badge/arch-x86--64-blue)
+![Language](https://img.shields.io/badge/language-C%20%7C%20NASM-informational)
+![Boot](https://img.shields.io/badge/boot-Limine%20(BIOS%20%2B%20UEFI)-orange)
+![Tests](https://img.shields.io/badge/boot%20tests-223%20passing-brightgreen)
+![Status](https://img.shields.io/badge/progress-Phase%205%20of%2010-yellow)
 
-[boot] CPU entered long mode (64-bit).
-[boot] Bootloader: Limine 12.6.1
-...
-[pmm] Total physical memory :   523768 KiB
-[vmm]   .text   0xffffffff80200000 - 0xffffffff80207000 -> phys 0x...  R-X
-[heap] Kernel heap at 0xffffc00000000000, 64 KiB mapped, limit 256 MiB
-[test] ===== 114 passed, 0 failed =====
-[kstack] 256 slots of 32 KiB (16 KiB stack + guard) at 0xffffe00000000000
-[proc] Kernel process PID 0 created; boot flow adopted as TID 0 ...
-[A] counter = 1  (TID 4, rsp in own stack)
-[B] counter = 101  (TID 5, rsp in own stack)
-[A] counter = 2  (TID 4, rsp in own stack)
-...
-[test] ===== 83 passed, 0 failed =====
-[sched] Round-robin scheduler: 100 Hz timer, quantum 2 ticks (20 ms), ...
+</div>
+
+---
+
+## Overview
+
+NEXUS is a modular, 64-bit kernel built layer by layer: boot, interrupts,
+memory, threads, then scheduling. Each layer ships with self-tests that run
+**inside the kernel at every boot**, so every claim below is verified on
+each run.
+
+**Current state:** preemptive multitasking kernel (Phases 1–5 of 10).
+
+```text
+[sched] Round-robin scheduler: 100 Hz timer, quantum 2 ticks (20 ms)
 [test]   CPU handed out in this order: A B C A B C A B C A B C ...
-  Thread A :  26 time slices,  52 CPU ticks, ...
-  Thread B :  26 time slices,  52 CPU ticks, ...
-  Thread C :  25 time slices,  50 CPU ticks, ...
+  Thread A :  26 time slices,  52 CPU ticks
+  Thread B :  26 time slices,  52 CPU ticks
+  Thread C :  25 time slices,  50 CPU ticks
 [test] ===== 26 passed, 0 failed =====
 
-[ok] Kernel started successfully.
 [ok] Phase 3 memory management verified.
 [ok] Phase 4 process management verified.
 [ok] Phase 5 scheduler verified.
 ```
 
-Implemented so far:
+Full boot log: [docs/BOOT_OUTPUT.md](docs/BOOT_OUTPUT.md)
 
-- **Phase 1:** boots via Limine and brings up the COM1 serial console.
-- **Phase 2:** GDT/TSS, IDT, CPU exception reporting, PIT timer.
-- **Phase 3:** physical page-frame allocator, 4-level paging, virtual
-  mapping API, kernel heap, page-fault reporting, and per-process address
-  spaces. See [docs/memory-management.md](docs/memory-management.md).
-- **Phase 4:** processes and kernel threads, a per-thread kernel stack
-  with guard page and canary, x86-64 context switching, lifecycle and
-  reclamation, and a process/thread registry with diagnostics. No
-  scheduler yet. See [docs/process-model.md](docs/process-model.md).
-- **Phase 5:** timer-driven preemptive round-robin scheduler (100 Hz PIT,
-  20 ms quantum), ready queue, idle thread, tick-based sleep, preemption-safe
-  allocators and console, and scheduler statistics with a live dashboard.
-  See [docs/scheduler.md](docs/scheduler.md).
+## Features
 
-## Prerequisites
+| Area | What's implemented |
+|---|---|
+| **Boot** | Limine protocol, BIOS and UEFI, higher-half kernel, serial console |
+| **CPU** | GDT/TSS with IST, IDT for all exceptions, detailed fault reports, PIT timer |
+| **Memory** | Bitmap page-frame allocator, 4-level paging, W^X kernel sections, kernel heap, per-process address spaces |
+| **Threads** | Processes and kernel threads, guarded kernel stacks, assembly context switch |
+| **Scheduler** | Preemptive round-robin, 20 ms quantum, idle thread, sleep, live statistics |
+| **Safety** | Guard pages, stack canaries, corrupted-context detection, preemption-safe allocators |
 
-| Tool | Purpose | Windows | Linux / WSL |
-|---|---|---|---|
-| Python 3.9+ | build system | python.org | `sudo apt install python3` |
-| Clang + LLD 14+ | C compiler + linker | [LLVM installer](https://github.com/llvm/llvm-project/releases) | `sudo apt install clang lld llvm` |
-| NASM 2.14+ | x86 assembler | [nasm.us](https://www.nasm.us/) | `sudo apt install nasm` |
-| QEMU 7+ | emulator | [qemu.org](https://www.qemu.org/download/) | `sudo apt install qemu-system-x86` |
-| OVMF (UEFI only) | UEFI firmware | bundled with QEMU | `sudo apt install ovmf` |
-| Limine 12.6.1 | bootloader | fetched by script | fetched by script |
+## Quick start
 
-## One-time setup
-
-### 1. Get the source
+**Requirements:** Python 3.9+, Clang/LLD 14+, NASM, QEMU 7+ (plus OVMF for UEFI).
 
 ```bash
-git clone <your-repo-url> nexus
-cd nexus
+git clone https://github.com/Siddhesh-source/NexusOS--a-custom-operating-system.git
+cd NexusOS--a-custom-operating-system
+python scripts/fetch_limine.py     # one-time: download the bootloader
+python build.py run                # build and boot in QEMU
 ```
 
-### 2. Fetch the Limine bootloader (both platforms)
+Quit QEMU with **Ctrl+A**, then **X**.
 
-```bash
-python scripts/fetch_limine.py
-```
+## Commands
 
-This downloads the Limine binary release and (on Windows) the `.exe` host
-tool into `tools/limine/`. No internet access is needed after this step.
+| Command | Description |
+|---|---|
+| `python build.py` | Build the kernel and bootable disk image |
+| `python build.py run` | Boot in QEMU (BIOS), serial output in the terminal |
+| `python build.py run-uefi` | Boot in QEMU through UEFI firmware (OVMF) |
+| `python build.py test` | Boot and verify every self-test (exit code 0 = pass) |
+| `python build.py test-faults` | Verify all 8 crash-handling demos |
+| `python build.py run --fault-demo <name>` | Boot, then trigger a fault: `pf` `null` `stack` `de` `ud` `df` `ctx` `tstack` |
+| `python build.py clean` | Remove build artifacts |
 
-### 3. Configure tool paths (optional)
+<details>
+<summary><b>Windows setup</b></summary>
 
-The build auto-detects tools on your `PATH`. If a tool is not on `PATH`
-(common on Windows), create a `.env` file in the project root:
+If the tools are not on `PATH`, create a `.env` file in the project root:
 
 ```ini
-# .env  -- Windows example
 NEXUS_CLANG=C:\Program Files\LLVM\bin\clang.exe
 NEXUS_LLD=C:\Program Files\LLVM\bin\ld.lld.exe
 NEXUS_OBJCOPY=C:\Program Files\LLVM\bin\llvm-objcopy.exe
 NEXUS_NASM=C:\Tools\NASM\nasm.exe
-NEXUS_QEMU=D:\qemu\qemu-system-x86_64.exe
-NEXUS_OVMF_CODE=D:\qemu\share\edk2-x86_64-code.fd
-NEXUS_OVMF_VARS=D:\qemu\share\edk2-i386-vars.fd
+NEXUS_QEMU=C:\qemu\qemu-system-x86_64.exe
+NEXUS_OVMF_CODE=C:\qemu\share\edk2-x86_64-code.fd
+NEXUS_OVMF_VARS=C:\qemu\share\edk2-i386-vars.fd
 ```
 
-On Linux/WSL you usually do **not** need a `.env` — everything is on `PATH`.
+Run `chcp 65001` first so the box-drawing characters in the output display
+correctly.
 
-## Build & run
+</details>
+
+<details>
+<summary><b>Linux / WSL setup</b></summary>
 
 ```bash
-python build.py            # compile kernel + build bootable image
-python build.py run        # boot in QEMU (BIOS, serial to stdout)
-python build.py run-uefi   # boot in QEMU (UEFI via OVMF)
-python build.py test       # build + boot + run memory and process self-tests
-python build.py test-faults  # verify every fatal-exception demo is reported
-python build.py clean      # remove build artifacts
-
-python build.py run --fault-demo pf   # boot, then trigger a fatal page fault
-                                      # (also: null, stack, de, ud, df,
-                                      #  ctx = corrupted thread context,
-                                      #  tstack = thread stack overflow)
+sudo apt install python3 clang lld llvm nasm qemu-system-x86 ovmf
 ```
 
-`python build.py test` exits `0` only if every boot-time check passes.
+No `.env` is needed; tools and OVMF are detected automatically.
 
-## Project layout
+</details>
 
-```
-nexus/
-├── .env                 # optional tool paths (gitignored)
-├── README.md
-├── build.py             # build orchestrator (build/run/test/clean)
-├── fat32.py             # FAT32 + MBR image writer (pure Python)
-├── test_boot.py         # automated QEMU boot test
-├── scripts/
-│   └── fetch_limine.py  # download Limine v12.6.1
-├── boot/
-│   └── limine.conf      # Limine boot menu
-├── kernel/
-│   ├── entry.asm        # 64-bit entry stub
-│   ├── kernel.c         # C entry point (Limine v12.x protocol)
-│   ├── serial.c/.h      # COM1 UART driver
-│   ├── kprintf.c/.h     # formatted serial output
-│   ├── string.c/.h      # memset/memcpy/memmove/memcmp
-│   ├── panic.c/.h       # panic handler
-│   ├── cpu.h            # port I/O, control registers, MSRs, invlpg
-│   ├── gdt.c/.h         # GDT + TSS (IST1 stack for #DF)
-│   ├── idt.c/.h         # IDT setup
-│   ├── interrupt_asm.asm  # exception/IRQ entry stubs
-│   ├── interrupts.c/.h  # dispatcher + exception reports
-│   ├── timer.c/.h       # PIC remap + PIT
-│   ├── mm.c/.h          # memory layout, boot memory info, mm_init
-│   ├── pmm.c/.h         # physical page-frame allocator (bitmap)
-│   ├── vmm.c/.h         # page tables, mapping API, address spaces
-│   ├── heap.c/.h        # kernel heap (kmalloc/kfree)
-│   ├── pagefault.c/.h   # #PF reporting + probe fixups
-│   ├── probe.asm        # fault-tolerant memory probes for tests
-│   ├── mm_test.c/.h     # boot-time memory tests
-│   ├── kstack.c/.h      # kernel thread stacks (guard page + canary)
-│   ├── context.h/.asm   # CPU context layout + context_switch
-│   ├── proc.c/.h        # processes, threads, registry, thread_switch
-│   ├── proc_test.c/.h   # boot-time process/thread tests + summary panel
-│   ├── context_test.asm # register-preservation probe for tests
-│   ├── sched.c/.h       # preemptive round-robin scheduler, idle, sleep
-│   ├── sched_test.c/.h  # scheduler tests, live dashboard, status panel
-│   ├── sched_spin.asm   # all-GPR preemption probe for tests
-│   ├── box.c/.h         # boxed diagnostic output
-│   ├── test_exception.c # deliberate fatal exceptions (fault demos)
-│   ├── kernel.h
-│   ├── linker.ld        # higher-half ELF linker script
-│   └── limine.h         # upstream Limine protocol header
-└── tools/limine/        # fetched bootloader binaries (gitignored)
+## Architecture
+
+```text
+┌──────────────────────────────────────────────────────────┐
+│  Scheduler          round-robin · preemption · idle      │  Phase 5
+├──────────────────────────────────────────────────────────┤
+│  Processes/Threads  kernel stacks · context switch       │  Phase 4
+├──────────────────────────────────────────────────────────┤
+│  Memory             PMM · paging · heap · page faults    │  Phase 3
+├──────────────────────────────────────────────────────────┤
+│  CPU & Interrupts   GDT/TSS · IDT · exceptions · timer   │  Phase 2
+├──────────────────────────────────────────────────────────┤
+│  Boot               Limine · long mode · serial          │  Phase 1
+└──────────────────────────────────────────────────────────┘
 ```
 
-## How it boots
+**Kernel virtual memory map**
 
-1. QEMU (SeaBIOS or OVMF) loads Limine from the FAT32 ESP.
-2. Limine reads `limine.conf`, loads `nexus.elf`, and jumps to `_start`.
-3. `entry.asm` zeroes BSS, sets up the stack, calls `kernel_main()`.
-4. `kernel.c` initialises COM1 and prints boot diagnostics using the
-   Limine response structures (bootloader info, executable address, HHDM).
-5. GDT/TSS, IDT, and the timer come up and interrupts are enabled.
-6. The Limine memory map is handed to `mm_init()`, which starts the PMM,
-   builds and loads the kernel's own page tables, and creates the heap.
-7. The memory self-tests run.
-8. The stack allocator and process manager start, and the boot flow
-   becomes thread 0 of the kernel process (PID 0).
-9. The process/thread self-tests switch between real kernel threads.
-10. The scheduler starts: the timer now preempts threads every 20 ms. The
-    scheduler tests and the live multitasking demo run. Then kmain sleeps
-    in a heartbeat loop, and the idle thread halts the CPU.
+| Address | Region |
+|---|---|
+| `0x0000000000000000` | User space (per process) |
+| `0xffff800000000000` | Direct map of physical RAM |
+| `0xffffc00000000000` | Kernel heap |
+| `0xffffe00000000000` | Kernel thread stacks |
+| `0xffffffff80200000` | Kernel image |
 
-## Cross-platform notes
+## Testing
 
-- `build.py` resolves every tool via `.env` override → `PATH` lookup.
-- `fat32.py` writes a portable MBR + FAT32 image with VFAT long names so
-  Limine can find `limine-bios.sys`. No `mtools`/`mkfs.fat` needed.
-- On Linux, `run-uefi` auto-detects OVMF at `/usr/share/OVMF/`.
-- On Windows, set `NEXUS_OVMF_*` in `.env` for UEFI boot.
+Every boot runs **223 checks** across three suites, then a live multitasking
+demo:
+
+| Suite | Checks | Highlights |
+|---|---|---|
+| Memory | 114 | allocator exhaustion, page permissions, invalid-access faults, heap integrity |
+| Processes | 83 | exact A/B switch trace, register preservation, 60 000-switch stress, stack isolation |
+| Scheduler | 26 | preemption of non-yielding threads, all 15 registers preserved, fairness, idle |
+
+All suites pass under BIOS and UEFI, with zero compiler warnings.
+
+## Roadmap
+
+- [x] **Phase 1:** bootable x86-64 kernel
+- [x] **Phase 2:** interrupts, exceptions, timer
+- [x] **Phase 3:** physical and virtual memory management
+- [x] **Phase 4:** processes, threads, context switching
+- [x] **Phase 5:** preemptive scheduler
+- [ ] **Phase 6:** user mode (ring 3) and system calls
+- [ ] **Phase 7:** userspace runtime and `nsh` shell
+- [ ] **Phase 8+:** filesystem, IPC, networking, GUI
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [Project overview](docs/PROJECT_OVERVIEW.md) | Problem statement, progress, concepts, tech stack |
+| [Interrupts](docs/interrupt-handling-implementation.md) | GDT, IDT, exceptions, timer |
+| [Memory management](docs/memory-management.md) | PMM, paging, heap, page faults |
+| [Process model](docs/process-model.md) | Processes, threads, stacks, context switch |
+| [Scheduler](docs/scheduler.md) | Round-robin, preemption, idle, statistics |
+| [Boot output](docs/BOOT_OUTPUT.md) | Annotated full boot log |
+
+## Project structure
+
+```text
+├── build.py          Build, run and test entry point
+├── test_boot.py      Automated QEMU test harness
+├── fat32.py          Bootable disk image writer (no external tools)
+├── boot/             Limine configuration
+├── scripts/          Bootloader download script
+├── docs/             Design documents
+└── kernel/
+    ├── entry.asm, kernel.c, linker.ld     Boot and main
+    ├── gdt, idt, interrupts, timer        CPU and interrupts
+    ├── pmm, vmm, heap, pagefault          Memory management
+    ├── kstack, proc, context.asm          Processes and threads
+    ├── sched                              Scheduler
+    └── *_test.c                           In-kernel self-tests
+```
+
+## Tech stack
+
+**C11** (freestanding) · **NASM** · **Clang/LLD** · **Limine 12** ·
+**QEMU** · **OVMF** · **Python 3** (build system and test harness)
