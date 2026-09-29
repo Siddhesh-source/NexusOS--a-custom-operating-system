@@ -7,18 +7,31 @@ and works identically on **Windows**, **Linux**, and **WSL**.
 ```
 ============================================
             N E X U S   O S
-        Phase 1: Kernel Foundation
+       Phase 3: Memory Management
 ============================================
 
 [boot] CPU entered long mode (64-bit).
 [boot] Bootloader: Limine 12.6.1
-[boot] Kernel loaded: phys=0x... virt=0xffffffff80200000
-[boot] COM1 serial initialised @ 115200 baud.
-[boot] Higher-half direct map offset=0xffff800000000000
+...
+[pmm] Total physical memory :   523768 KiB
+[pmm] Usable memory         :   522636 KiB
+[vmm]   .text   0xffffffff80200000 - 0xffffffff80207000 -> phys 0x...  R-X
+[vmm]   HHDM    0xffff800000000000 - ...  RW-
+[heap] Kernel heap at 0xffffc00000000000, 64 KiB mapped, limit 256 MiB
+...
+[test] ===== 114 passed, 0 failed =====
 
 [ok] Kernel started successfully.
-[ok] Phase 1 boot verified. Halting CPU.
+[ok] Phase 3 memory management verified.
 ```
+
+Implemented so far:
+
+- **Phase 1:** boots via Limine and brings up the COM1 serial console.
+- **Phase 2:** GDT/TSS, IDT, CPU exception reporting, PIT timer.
+- **Phase 3:** physical page-frame allocator, 4-level paging, virtual
+  mapping API, kernel heap, page-fault reporting, and per-process address
+  spaces. See [docs/memory-management.md](docs/memory-management.md).
 
 ## Prerequisites
 
@@ -73,11 +86,15 @@ On Linux/WSL you usually do **not** need a `.env` — everything is on `PATH`.
 python build.py            # compile kernel + build bootable image
 python build.py run        # boot in QEMU (BIOS, serial to stdout)
 python build.py run-uefi   # boot in QEMU (UEFI via OVMF)
-python build.py test       # build + boot + verify startup banner
+python build.py test       # build + boot + run memory self-tests
+python build.py test-faults  # verify every fatal-exception demo is reported
 python build.py clean      # remove build artifacts
+
+python build.py run --fault-demo pf   # boot, then trigger a fatal page fault
+                                      # (also: null, stack, de, ud, df)
 ```
 
-That's it. `python build.py test` exits `0` on success.
+`python build.py test` exits `0` only if every boot-time check passes.
 
 ## Project layout
 
@@ -96,7 +113,23 @@ nexus/
 │   ├── entry.asm        # 64-bit entry stub
 │   ├── kernel.c         # C entry point (Limine v12.x protocol)
 │   ├── serial.c/.h      # COM1 UART driver
+│   ├── kprintf.c/.h     # formatted serial output
+│   ├── string.c/.h      # memset/memcpy/memmove/memcmp
 │   ├── panic.c/.h       # panic handler
+│   ├── cpu.h            # port I/O, control registers, MSRs, invlpg
+│   ├── gdt.c/.h         # GDT + TSS (IST1 stack for #DF)
+│   ├── idt.c/.h         # IDT setup
+│   ├── interrupt_asm.asm  # exception/IRQ entry stubs
+│   ├── interrupts.c/.h  # dispatcher + exception reports
+│   ├── timer.c/.h       # PIC remap + PIT
+│   ├── mm.c/.h          # memory layout, boot memory info, mm_init
+│   ├── pmm.c/.h         # physical page-frame allocator (bitmap)
+│   ├── vmm.c/.h         # page tables, mapping API, address spaces
+│   ├── heap.c/.h        # kernel heap (kmalloc/kfree)
+│   ├── pagefault.c/.h   # #PF reporting + probe fixups
+│   ├── probe.asm        # fault-tolerant memory probes for tests
+│   ├── mm_test.c/.h     # boot-time memory tests
+│   ├── test_exception.c # deliberate fatal exceptions (fault demos)
 │   ├── kernel.h
 │   ├── linker.ld        # higher-half ELF linker script
 │   └── limine.h         # upstream Limine protocol header
@@ -110,6 +143,10 @@ nexus/
 3. `entry.asm` zeroes BSS, sets up the stack, calls `kernel_main()`.
 4. `kernel.c` initialises COM1 and prints boot diagnostics using the
    Limine response structures (bootloader info, executable address, HHDM).
+5. GDT/TSS, IDT, and the timer come up and interrupts are enabled.
+6. The Limine memory map is handed to `mm_init()`, which starts the PMM,
+   builds and loads the kernel's own page tables, and creates the heap.
+7. The memory self-tests run, and the kernel idles on `hlt`.
 
 ## Cross-platform notes
 

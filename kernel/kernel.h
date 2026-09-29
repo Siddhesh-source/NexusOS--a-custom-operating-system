@@ -5,4 +5,10 @@
 
 void kernel_main(void) __attribute__((noreturn));
 
-#endif
+/* Deliberate fatal exceptions (test_exception.c), used by fault demos. */
+void test_divide_by_zero(void);
+void test_invalid_opcode(void);
+void test_double_fault(void);
+void test_stack_overflow(void);
+
+#endif /* NEXUS_KERNEL_H */

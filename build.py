@@ -111,18 +111,34 @@ LDFLAGS = [
     "--image-base=0xffffffff80200000",
 ]
 
-C_SOURCES = ["kernel.c", "serial.c", "panic.c"]
+C_SOURCES = [
+    "kernel.c", "serial.c", "panic.c", "kprintf.c", "string.c",
+    # Phase 2: descriptor tables, exceptions, timer
+    "gdt.c", "idt.c", "interrupts.c", "timer.c", "test_exception.c",
+    # Phase 3: memory management
+    "mm.c", "pmm.c", "vmm.c", "heap.c", "pagefault.c", "mm_test.c",
+]
+ASM_SOURCES = ["interrupt_asm.asm", "probe.asm"]
+
+# Opt-in fatal exception demos (see run_fault_demo() in kernel.c).
+FAULT_DEMOS = ["pf", "null", "stack", "de", "ud", "df"]
 
 
-def build_kernel() -> Path:
+def build_kernel(fault_demo: str | None = None) -> Path:
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     entry_o = BUILD_DIR / "entry.o"
     run([TOOLS["nasm"], "-f", "elf64", "-F", "dwarf", "-g",
          str(KERNEL_DIR / "entry.asm"), "-o", str(entry_o)])
     objs = [entry_o]
+    defines = [f"-DNEXUS_FAULT_DEMO_{fault_demo.upper()}"] if fault_demo else []
     for src in C_SOURCES:
         obj = BUILD_DIR / (Path(src).stem + ".o")
-        run([TOOLS["clang"], *CFLAGS, "-c", str(KERNEL_DIR / src), "-o", str(obj)])
+        run([TOOLS["clang"], *CFLAGS, *defines, "-c", str(KERNEL_DIR / src), "-o", str(obj)])
+        objs.append(obj)
+    for src in ASM_SOURCES:
+        obj = BUILD_DIR / (Path(src).stem + ".o")
+        run([TOOLS["nasm"], "-f", "elf64", "-F", "dwarf", "-g",
+             str(KERNEL_DIR / src), "-o", str(obj)])
         objs.append(obj)
     run([TOOLS["ld"], *LDFLAGS, *[str(o) for o in objs], "-o", str(KERNEL_ELF)])
     ok(f"Built {KERNEL_ELF}")
@@ -188,6 +204,24 @@ def run_test(image: Path) -> int:
     return run_boot_test(image)
 
 
+def run_fault_tests() -> int:
+    """Build and boot every fatal fault demo, checking each is reported."""
+    from test_boot import run_fault_demo_test
+    failures = []
+    for demo in FAULT_DEMOS:
+        print(f"\n===== fault demo: {demo} =====")
+        image = build_image(build_kernel(fault_demo=demo))
+        if run_fault_demo_test(image, demo) != 0:
+            failures.append(demo)
+    build_image(build_kernel())   # leave a normal image behind
+    print("=" * 60)
+    if failures:
+        print(f"[FAIL] fault demos failed: {', '.join(failures)}")
+        return 1
+    print(f"[PASS] all {len(FAULT_DEMOS)} fault demos reported correctly.")
+    return 0
+
+
 def clean() -> None:
     if BUILD_DIR.exists():
         shutil.rmtree(BUILD_DIR)
@@ -196,11 +230,14 @@ def clean() -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="build.py",
-                                 description="NEXUS OS Phase 1 build system")
+                                 description="NEXUS OS build system")
     ap.add_argument("command",
                     choices=["build", "image", "run", "run-uefi", "test",
-                             "clean", "help"],
+                             "test-faults", "clean", "help"],
                     nargs="?", default="build")
+    ap.add_argument("--fault-demo", choices=FAULT_DEMOS,
+                    help="build a kernel that deliberately triggers this fatal "
+                         "exception after the memory tests")
     args = ap.parse_args()
 
     if args.command == "help":
@@ -212,8 +249,10 @@ def main() -> int:
 
     try:
         configure()
+        if args.command == "test-faults":
+            return run_fault_tests()
         if args.command in ("build", "image", "run", "run-uefi", "test"):
-            kernel = build_kernel()
+            kernel = build_kernel(fault_demo=args.fault_demo)
             image = build_image(kernel)
         if args.command == "run":
             return run_qemu(image, uefi=False)

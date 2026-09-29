@@ -32,6 +32,8 @@ _start:
 section .bss
 align 4096
 
+global stack_top
+global stack_bottom
 stack_bottom:
     resb 65536
 stack_top:
