@@ -1,6 +1,7 @@
 #include "kstack.h"
 #include "vmm.h"
 #include "pmm.h"
+#include "cpu.h"
 #include "kprintf.h"
 #include "panic.h"
 #include "string.h"
@@ -35,6 +36,7 @@ void kstack_init(void)
 
 kstack_status_t kstack_alloc(struct kstack *out)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     int slot = -1;
     for (int i = 0; i < KSTACK_MAX_SLOTS; i++) {
         if (!slot_used[i]) {
@@ -75,6 +77,7 @@ kstack_status_t kstack_alloc(struct kstack *out)
 
 kstack_status_t kstack_free(struct kstack *s)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     if (s == NULL || s->slot < 0 || s->slot >= KSTACK_MAX_SLOTS || !slot_used[s->slot]
         || s->top != slot_top(s->slot) || s->base != s->top - KSTACK_SIZE)
         return KSTACK_ERR_INVALID;

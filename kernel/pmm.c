@@ -1,4 +1,5 @@
 #include "pmm.h"
+#include "cpu.h"
 #include "kprintf.h"
 #include "panic.h"
 #include "string.h"
@@ -141,6 +142,7 @@ void pmm_init(const struct boot_mem_info *info)
 
 uint64_t pmm_alloc_page(void)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     if (free_pages == 0)
         return 0;
 
@@ -174,6 +176,7 @@ uint64_t pmm_alloc_zeroed_page(void)
 
 pmm_status_t pmm_free_page(uint64_t phys)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     pmm_status_t st = PMM_OK;
 
     if (!IS_PAGE_ALIGNED(phys))
@@ -195,6 +198,7 @@ pmm_status_t pmm_free_page(uint64_t phys)
 
 bool pmm_is_allocated(uint64_t phys)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     return IS_PAGE_ALIGNED(phys) && frame_is_managed(phys) && bit_test(phys >> PAGE_SHIFT);
 }
 
@@ -205,6 +209,7 @@ uint64_t pmm_free_page_count(void)
 
 void pmm_get_stats(struct pmm_stats *out)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     out->total_bytes = total_bytes;
     out->usable_bytes = usable_bytes;
     out->reserved_bytes = total_bytes - usable_bytes;

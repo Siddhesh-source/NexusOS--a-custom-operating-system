@@ -10,6 +10,8 @@
 #include "kstack.h"
 #include "proc.h"
 #include "proc_test.h"
+#include "sched.h"
+#include "sched_test.h"
 #include "kprintf.h"
 #include "cpu.h"
 
@@ -127,7 +129,7 @@ void kernel_main(void)
 
     serial_puts("\n============================================\n");
     serial_puts("            N E X U S   O S\n");
-    serial_puts("   Phase 4: Processes, Threads & Switching\n");
+    serial_puts("     Phase 5: Preemptive Scheduler\n");
     serial_puts("============================================\n\n");
 
     serial_puts("[boot] CPU entered long mode (64-bit).\n");
@@ -187,6 +189,13 @@ void kernel_main(void)
     proc_init();
     bool proc_ok = proc_run_tests();
 
+    /* Phase 5: preemptive scheduling. The boot flow (TID 0) is already the
+     * registered current thread; from here on it is scheduled like any
+     * other thread. */
+    sched_init();
+    sched_start();
+    bool sched_ok = sched_run_tests();
+
     serial_puts("\n[ok] Kernel started successfully.\n");
     if (mm_ok)
         serial_puts("[ok] Phase 3 memory management verified.\n");
@@ -196,10 +205,17 @@ void kernel_main(void)
         serial_puts("[ok] Phase 4 process management verified.\n");
     else
         serial_puts("[FAIL] Phase 4 process tests reported failures.\n");
+    if (sched_ok)
+        serial_puts("[ok] Phase 5 scheduler verified.\n");
+    else
+        serial_puts("[FAIL] Phase 5 scheduler tests reported failures.\n");
 
     run_fault_demo();
 
-    /* Idle loop - wait for interrupts */
-    for (;;)
-        __asm__ volatile("hlt");
+    /* Heartbeat: a dot per second. kmain sleeps in between, so the idle
+     * thread (not this loop) is what halts the CPU. */
+    for (;;) {
+        sched_sleep(SCHED_TIMER_HZ);
+        serial_puts(".");
+    }
 }

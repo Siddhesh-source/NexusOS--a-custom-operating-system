@@ -7,7 +7,7 @@ and works identically on **Windows**, **Linux**, and **WSL**.
 ```
 ============================================
             N E X U S   O S
-   Phase 4: Processes, Threads & Switching
+     Phase 5: Preemptive Scheduler
 ============================================
 
 [boot] CPU entered long mode (64-bit).
@@ -24,10 +24,17 @@ and works identically on **Windows**, **Linux**, and **WSL**.
 [A] counter = 2  (TID 4, rsp in own stack)
 ...
 [test] ===== 83 passed, 0 failed =====
+[sched] Round-robin scheduler: 100 Hz timer, quantum 2 ticks (20 ms), ...
+[test]   CPU handed out in this order: A B C A B C A B C A B C ...
+  Thread A :  26 time slices,  52 CPU ticks, ...
+  Thread B :  26 time slices,  52 CPU ticks, ...
+  Thread C :  25 time slices,  50 CPU ticks, ...
+[test] ===== 26 passed, 0 failed =====
 
 [ok] Kernel started successfully.
 [ok] Phase 3 memory management verified.
 [ok] Phase 4 process management verified.
+[ok] Phase 5 scheduler verified.
 ```
 
 Implemented so far:
@@ -41,6 +48,10 @@ Implemented so far:
   with guard page and canary, x86-64 context switching, lifecycle and
   reclamation, and a process/thread registry with diagnostics. No
   scheduler yet. See [docs/process-model.md](docs/process-model.md).
+- **Phase 5:** timer-driven preemptive round-robin scheduler (100 Hz PIT,
+  20 ms quantum), ready queue, idle thread, tick-based sleep, preemption-safe
+  allocators and console, and scheduler statistics with a live dashboard.
+  See [docs/scheduler.md](docs/scheduler.md).
 
 ## Prerequisites
 
@@ -145,6 +156,9 @@ nexus/
 │   ├── proc.c/.h        # processes, threads, registry, thread_switch
 │   ├── proc_test.c/.h   # boot-time process/thread tests + summary panel
 │   ├── context_test.asm # register-preservation probe for tests
+│   ├── sched.c/.h       # preemptive round-robin scheduler, idle, sleep
+│   ├── sched_test.c/.h  # scheduler tests, live dashboard, status panel
+│   ├── sched_spin.asm   # all-GPR preemption probe for tests
 │   ├── box.c/.h         # boxed diagnostic output
 │   ├── test_exception.c # deliberate fatal exceptions (fault demos)
 │   ├── kernel.h
@@ -166,8 +180,10 @@ nexus/
 7. The memory self-tests run.
 8. The stack allocator and process manager start, and the boot flow
    becomes thread 0 of the kernel process (PID 0).
-9. The process/thread self-tests switch between real kernel threads, and
-   the kernel idles on `hlt`.
+9. The process/thread self-tests switch between real kernel threads.
+10. The scheduler starts: the timer now preempts threads every 20 ms. The
+    scheduler tests and the live multitasking demo run. Then kmain sleeps
+    in a heartbeat loop, and the idle thread halts the CPU.
 
 ## Cross-platform notes
 

@@ -726,6 +726,9 @@ static void print_summary(void)
 
 void proc_demo_corrupt_context(void)
 {
+    /* With preemption active, keep the timer from running the victim before
+     * we corrupt it. */
+    IRQ_GUARD();
     proc_status_t err;
     struct thread *t = thread_create(process_kernel(), "victim", trivial_entry, NULL, &err);
     struct cpu_context *ctx = (struct cpu_context *)t->saved_rsp;

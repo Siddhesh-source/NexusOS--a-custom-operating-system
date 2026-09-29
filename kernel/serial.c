@@ -41,26 +41,45 @@ void serial_putchar(char c)
     outb(port + REG_THR, (uint8_t)c);
 }
 
+/* Strings are written with interrupts disabled so that, once threads are
+ * preemptive, one thread's output can't be split by another's. */
+static inline uint64_t serial_lock(void)
+{
+    uint64_t flags;
+    __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) : : "memory");
+    return flags;
+}
+
+static inline void serial_unlock(uint64_t flags)
+{
+    if (flags & (1ULL << 9))
+        __asm__ volatile("sti" : : : "memory");
+}
+
 void serial_puts(const char *s)
 {
     if (s == NULL)
         return;
+    uint64_t flags = serial_lock();
     while (*s) {
         if (*s == '\n')
             serial_putchar('\r');
         serial_putchar(*s++);
     }
+    serial_unlock(flags);
 }
 
 void serial_write(const char *buf, uint64_t n)
 {
     if (buf == NULL)
         return;
+    uint64_t flags = serial_lock();
     for (uint64_t i = 0; i < n; i++) {
         if (buf[i] == '\n')
             serial_putchar('\r');
         serial_putchar(buf[i]);
     }
+    serial_unlock(flags);
 }
 
 void serial_put_hex(uint64_t value)

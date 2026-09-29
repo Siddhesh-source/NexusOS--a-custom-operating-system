@@ -119,8 +119,11 @@ C_SOURCES = [
     "mm.c", "pmm.c", "vmm.c", "heap.c", "pagefault.c", "mm_test.c",
     # Phase 4: processes, threads, context switching
     "kstack.c", "proc.c", "proc_test.c",
+    # Phase 5: preemptive scheduler
+    "sched.c", "sched_test.c",
 ]
-ASM_SOURCES = ["interrupt_asm.asm", "probe.asm", "context.asm", "context_test.asm"]
+ASM_SOURCES = ["interrupt_asm.asm", "probe.asm", "context.asm", "context_test.asm",
+               "sched_spin.asm"]
 
 # Opt-in fatal exception demos (see run_fault_demo() in kernel.c).
 FAULT_DEMOS = ["pf", "null", "stack", "de", "ud", "df", "ctx", "tstack"]

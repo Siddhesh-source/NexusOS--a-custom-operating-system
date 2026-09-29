@@ -1,6 +1,7 @@
 #include "heap.h"
 #include "vmm.h"
 #include "pmm.h"
+#include "cpu.h"
 #include "kprintf.h"
 #include "panic.h"
 #include "string.h"
@@ -177,6 +178,7 @@ void heap_init(void)
 
 void *kmalloc_aligned(size_t size, size_t align)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     if (size == 0)
         return NULL;
     if (align == 0 || (align & (align - 1)) != 0 || align > HEAP_MAX_ALIGN) {
@@ -238,6 +240,7 @@ static struct block *find_block(void *ptr)
 
 heap_status_t kfree(void *ptr)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     if (ptr == NULL)
         return HEAP_OK;
 
@@ -263,6 +266,7 @@ heap_status_t kfree(void *ptr)
 
 void heap_get_stats(struct heap_stats *out)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     memset(out, 0, sizeof(*out));
     out->mapped_bytes = heap_end - KERNEL_HEAP_BASE;
     out->alloc_failures = alloc_failures;
@@ -291,6 +295,7 @@ void heap_print_stats(void)
 
 bool heap_check(void)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     uint64_t expect = KERNEL_HEAP_BASE;
     struct block *prev = NULL;
     for (struct block *b = head; b != NULL; b = b->next) {

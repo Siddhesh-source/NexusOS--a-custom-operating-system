@@ -1,4 +1,5 @@
 #include "proc.h"
+#include "sched.h"
 #include "heap.h"
 #include "cpu.h"
 #include "box.h"
@@ -101,6 +102,9 @@ static void process_update_state(struct process *p)
              : fresh ? TASK_NEW : TASK_TERMINATED;
 }
 
+/* Every thread state change goes through here, so the scheduler's queues
+ * (ready queue = exactly the READY threads) can never drift out of sync.
+ * Callers hold interrupts off. */
 static proc_status_t set_state(struct thread *t, task_state_t to)
 {
     if (!transition_allowed(t->state, to)) {
@@ -108,7 +112,9 @@ static proc_status_t set_state(struct thread *t, task_state_t to)
                 t->tid, task_state_str(t->state), task_state_str(to));
         return PROC_ERR_BAD_STATE;
     }
+    task_state_t from = t->state;
     t->state = to;
+    sched_state_changed(t, from, to);
     process_update_state(t->process);
     return PROC_OK;
 }
@@ -223,12 +229,20 @@ struct process *process_create(const char *name, uint32_t flags, proc_status_t *
     }
 
     uint64_t flags_irq = irq_save();
+    /* Re-check: with preemption, another thread may have filled the table
+     * between the early check and now. */
+    if (!table_insert((void **)proc_table, PROC_MAX, p)) {
+        irq_restore(flags_irq);
+        if (p->owns_as)
+            vmm_destroy_address_space(&p->own_as);
+        kfree(p);
+        return fail(err, PROC_ERR_TABLE_FULL, "process_create");
+    }
     p->magic = PROCESS_MAGIC;
     p->pid = next_pid++;
     p->state = TASK_NEW;
     copy_name(p->name, name);
     p->parent = current->process->pid;
-    table_insert((void **)proc_table, PROC_MAX, p);
     nproc++;
     irq_restore(flags_irq);
 
@@ -249,7 +263,7 @@ proc_status_t process_terminate(struct process *p)
     uint64_t flags = irq_save();
     for (struct thread *t = p->threads; t != NULL; t = t->next_in_process) {
         if (t->state != TASK_TERMINATED) {
-            t->state = TASK_TERMINATED;
+            set_state(t, TASK_TERMINATED);   /* also leaves ready/sleep lists */
             t->exit_code = -1;
         }
     }
@@ -328,13 +342,24 @@ struct thread *thread_create(struct process *p, const char *name,
     init_context(t);
 
     uint64_t flags = irq_save();
+    /* Re-validate atomically: while we were allocating (preemptible), the
+     * process may have been terminated or reaped, or the table filled. */
+    proc_status_t late = !process_valid(p) ? PROC_ERR_INVALID
+                       : p->state == TASK_TERMINATED ? PROC_ERR_BAD_STATE
+                       : !table_insert((void **)thread_table, THREAD_MAX, t) ? PROC_ERR_TABLE_FULL
+                       : PROC_OK;
+    if (late != PROC_OK) {
+        irq_restore(flags);
+        kstack_free(&t->stack);
+        kfree(t);
+        return fail(err, late, "thread_create");
+    }
     t->tid = next_tid++;
     struct thread **link = &p->threads;
     while (*link != NULL)
         link = &(*link)->next_in_process;
     *link = t;
     p->thread_count++;
-    table_insert((void **)thread_table, THREAD_MAX, t);
     nthread++;
     set_state(t, TASK_READY);
     irq_restore(flags);
@@ -407,8 +432,15 @@ void thread_exit(int64_t code)
     t->exit_code = code;
     set_state(t, TASK_TERMINATED);
 
-    /* No scheduler yet: hand the CPU back to the thread that created us,
-     * falling back to the boot thread, then to any READY thread. */
+    /* With the scheduler running, it picks the next READY thread (or idle).
+     * The TERMINATED thread is on no queue, so it can never be resumed;
+     * its stack stays intact until proc_reap runs on another thread. */
+    if (sched_active())
+        sched_reschedule();
+
+    /* Before the scheduler starts (Phase 4 tests): hand the CPU back to the
+     * thread that created us, falling back to the boot thread, then to any
+     * READY thread. */
     struct thread *next = thread_find(t->exit_to);
     if (next == NULL || next->state != TASK_READY)
         next = boot_thread.state == TASK_READY ? &boot_thread : thread_next_ready(t);

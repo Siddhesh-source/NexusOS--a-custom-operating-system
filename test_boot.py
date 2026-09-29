@@ -17,6 +17,7 @@ REQUIRED = [
     "[ok] Kernel started successfully.",
     "[ok] Phase 3 memory management verified.",
     "[ok] Phase 4 process management verified.",
+    "[ok] Phase 5 scheduler verified.",
 ]
 
 # Any of these means the boot went wrong, even if the markers above appear.
@@ -38,11 +39,12 @@ FAULT_DEMO_EXPECT = {
     "df":    ["[exception] Double fault (#DF)"],
     "ctx":   ["FATAL context-switch error: saved instruction pointer lies outside kernel text",
               "RIP      : 0x00000000deadbeef", "KERNEL PANIC", "corrupted thread context"],
-    # The overflowing push faults in the unmapped guard below slot 0's stack
-    # (0xffffe00000000000 + 16 KiB); #PF cannot be delivered on that stack,
-    # so the CPU raises #DF on the IST1 stack.
+    # The overflowing push faults in the unmapped guard below the thread's
+    # stack, somewhere in the kernel-stack region (0xffffe00000000000, 8 MiB;
+    # the slot depends on how many threads exist, e.g. the idle thread).
+    # #PF cannot be delivered on that stack, so the CPU raises #DF on IST1.
     "tstack": ["[demo] Thread TID", "[exception] Double fault (#DF)",
-               "cr2=0xffffe00000003"],
+               "cr2=0xffffe00000"],
 }
 
 # Demos whose expected output legitimately contains a normally-forbidden marker.
@@ -131,6 +133,7 @@ def run_boot_test(image: Path, timeout: int = 120) -> int:
         print("[PASS] NEXUS OS booted successfully.")
         print("[PASS] Phase 3 memory-management tests passed.")
         print("[PASS] Phase 4 process/thread tests passed.")
+        print("[PASS] Phase 5 scheduler tests passed.")
         return 0
     print("[FAIL] Boot did not complete cleanly.")
     for m in FORBIDDEN:
@@ -144,7 +147,8 @@ def run_boot_test(image: Path, timeout: int = 120) -> int:
 
 def run_fault_demo_test(image: Path, demo: str, timeout: int = 120) -> int:
     expect = FAULT_DEMO_EXPECT[demo] + ["[ok] Phase 3 memory management verified.",
-                                        "[ok] Phase 4 process management verified."]
+                                        "[ok] Phase 4 process management verified.",
+                                        "[ok] Phase 5 scheduler verified."]
     forbidden = [m for m in ["KERNEL PANIC", "[FAIL]"]
                  if m not in FAULT_DEMO_ALLOW.get(demo, [])]
     success, full = boot_and_watch(image, expect, forbidden, timeout)

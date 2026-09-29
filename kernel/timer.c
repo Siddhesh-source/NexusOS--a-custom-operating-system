@@ -4,6 +4,7 @@
 #include "interrupts.h"
 #include "gdt.h"
 #include "cpu.h"
+#include "sched.h"
 
 volatile uint64_t timer_ticks = 0;
 
@@ -67,11 +68,19 @@ void timer_irq(void)
 {
     timer_ticks++;
 
-    /* Output a dot every 100 ticks (~1 second at 100Hz) */
-    if (timer_ticks % 100 == 0)
+    /* Heartbeat dot every 100 ticks (~1 second) until the scheduler takes
+     * over the console; afterwards it would split other threads' lines. */
+    if (!sched_active() && timer_ticks % 100 == 0)
         serial_puts(".");
 
-    outb(PIC_MASTER_CMD, 0x20);   /* EOI */
+    /* EOI BEFORE scheduling: sched_tick may switch to another thread, and
+     * this handler might not finish until the interrupted thread is picked
+     * again. The PIC must keep delivering IRQ0 in the meantime. Interrupts
+     * stay disabled (interrupt gate) until the next thread re-enables them,
+     * so this cannot nest. */
+    outb(PIC_MASTER_CMD, 0x20);
+
+    sched_tick();
 }
 
 void timer_wait(uint32_t ticks)

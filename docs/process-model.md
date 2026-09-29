@@ -190,7 +190,7 @@ the following:
 - The trampoline calls `thread_bootstrap(t)`, which enables interrupts, runs
   `entry(arg)`, and passes the return value to `thread_exit`.
 
-**Exit.** `thread_exit` marks the thread TERMINATED and switches to its
+**Exit (Phase 5 update).** Once the scheduler is running, `thread_exit` hands the CPU to the scheduler (see [scheduler.md](scheduler.md)). Before that, during the Phase 4 boot tests, `thread_exit` marks the thread TERMINATED and switches to its
 `exit_to` thread (the creator). If that thread isn't READY, it falls back to
 kmain, then to any READY thread. This is the one spot where Phase 5's
 scheduler will take over.
@@ -292,7 +292,7 @@ passes only if every Phase 3 and Phase 4 check passes and no
 
 ## Known limitations
 
-- **No scheduler or preemption.** `thread_exit` hands off to its creator as
+- **(Resolved in Phase 5.)** At first there was no scheduler: `thread_exit` handed off to its creator as
   a placeholder.
 - **Single CPU.** Consistency relies on disabling interrupts; there are no
   locks or per-CPU `current` yet.

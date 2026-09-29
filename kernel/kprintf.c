@@ -1,5 +1,6 @@
 #include "kprintf.h"
 #include "serial.h"
+#include "cpu.h"
 #include <stdbool.h>
 
 /* Output goes through a sink: either the serial port or a bounded buffer. */
@@ -149,6 +150,9 @@ static void format(struct sink *s, const char *fmt, va_list ap)
 
 void kprintf(const char *fmt, ...)
 {
+    /* One call = one uninterrupted write, so output from preempted threads
+     * never interleaves mid-line. */
+    IRQ_GUARD();
     struct sink s = { .buf = NULL };
     va_list ap;
     va_start(ap, fmt);

@@ -133,6 +133,7 @@ static vmm_status_t check_flags(uint64_t virt, uint32_t flags)
 
 vmm_status_t vmm_map_page(address_space_t *as, uint64_t virt, uint64_t phys, uint32_t flags)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     vmm_status_t st = check_virt(as, virt);
     if (st != VMM_OK)
         return st;
@@ -156,6 +157,7 @@ vmm_status_t vmm_map_page(address_space_t *as, uint64_t virt, uint64_t phys, uin
 
 vmm_status_t vmm_unmap_page(address_space_t *as, uint64_t virt, uint64_t *old_phys)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     vmm_status_t st = check_virt(as, virt);
     if (st != VMM_OK)
         return st;
@@ -175,6 +177,7 @@ vmm_status_t vmm_unmap_page(address_space_t *as, uint64_t virt, uint64_t *old_ph
 
 vmm_status_t vmm_translate(address_space_t *as, uint64_t virt, uint64_t *phys)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     if (as == NULL || as->pml4_phys == 0)
         return VMM_ERR_INVALID;
     if (!vmm_is_canonical(virt))
@@ -194,6 +197,7 @@ vmm_status_t vmm_translate(address_space_t *as, uint64_t virt, uint64_t *phys)
 
 vmm_status_t vmm_get_flags(address_space_t *as, uint64_t virt, uint32_t *flags)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     vmm_status_t st = check_virt(as, virt);
     if (st != VMM_OK)
         return st;
@@ -210,6 +214,7 @@ vmm_status_t vmm_get_flags(address_space_t *as, uint64_t virt, uint32_t *flags)
 
 vmm_status_t vmm_protect_page(address_space_t *as, uint64_t virt, uint32_t flags)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     vmm_status_t st = check_virt(as, virt);
     if (st != VMM_OK)
         return st;
@@ -244,6 +249,7 @@ vmm_status_t vmm_map_range(address_space_t *as, uint64_t virt, uint64_t phys,
 
 vmm_status_t vmm_reserve_tables(address_space_t *as, uint64_t virt, uint64_t size)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     vmm_status_t st = check_virt(as, virt);
     if (st != VMM_OK)
         return st;
@@ -263,6 +269,7 @@ vmm_status_t vmm_reserve_tables(address_space_t *as, uint64_t virt, uint64_t siz
 
 vmm_status_t vmm_create_address_space(address_space_t *out)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     if (out == NULL)
         return VMM_ERR_INVALID;
 
@@ -295,6 +302,7 @@ static void free_table(uint64_t phys, int level)
 
 vmm_status_t vmm_destroy_address_space(address_space_t *as)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     if (as == NULL || as->pml4_phys == 0 || as == &kernel_space
         || as->pml4_phys == kernel_space.pml4_phys
         || as->pml4_phys == (read_cr3() & PTE_ADDR_MASK))
@@ -312,6 +320,7 @@ vmm_status_t vmm_destroy_address_space(address_space_t *as)
 
 void vmm_switch(address_space_t *as)
 {
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
     write_cr3(as->pml4_phys);
     current_space = as;
 }

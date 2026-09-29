@@ -99,7 +99,21 @@ struct thread {
     tid_t exit_to;                /* thread resumed when this one exits */
     int64_t exit_code;
     uint64_t switch_count;        /* times this thread was switched to */
+
+    /* Scheduler bookkeeping (sched.c). A thread is on at most one list:
+     * the ready queue while READY, the sleep list while sleeping. */
+    struct thread *sched_prev;
+    struct thread *sched_next;
+    uint8_t sched_list;           /* SCHED_LIST_* */
+    uint64_t wake_tick;           /* sleeping: tick at which to wake */
+    uint64_t cpu_ticks;           /* timer ticks that hit while RUNNING */
+    uint64_t preempted_count;     /* times the timer took the CPU away */
 };
+
+/* Which scheduler list a thread is on (struct thread.sched_list). */
+#define SCHED_LIST_NONE   0
+#define SCHED_LIST_READY  1
+#define SCHED_LIST_SLEEP  2
 
 /* ---- lifecycle ---------------------------------------------------------- */
 
