@@ -106,7 +106,13 @@ INCLUDE_DIRS = sorted({h.parent for h in KERNEL_DIR.rglob("*.h")})
 
 CFLAGS = [
     "-target", "x86_64-unknown-none-elf",
-    "-ffreestanding", "-fno-stack-protector", "-fno-pie", "-fno-pic",
+    "-ffreestanding", "-fno-pie", "-fno-pic",
+    # Frame pointers in every function (leaf ones too) so panics can walk
+    # the stack and print a call trace.
+    "-fno-omit-frame-pointer", "-mno-omit-leaf-frame-pointer",
+    # Canary check in every function with a local array or address-taken
+    # local; the canary is the global __stack_chk_guard (stack_protector.c).
+    "-fstack-protector-strong", "-mstack-protector-guard=global",
     "-mno-red-zone", "-mno-mmx", "-mno-sse", "-mno-sse2",
     "-mcmodel=kernel", "-m64", "-march=x86-64",
     "-Wall", "-Wextra", "-O2", "-g", "-std=gnu11",
@@ -134,7 +140,8 @@ def object_for(src: Path) -> Path:
 
 
 # Opt-in fatal exception demos (see run_fault_demo() in kernel.c).
-FAULT_DEMOS = ["pf", "null", "stack", "de", "ud", "df", "ctx", "tstack"]
+FAULT_DEMOS = ["pf", "null", "stack", "de", "ud", "df", "ctx", "tstack",
+               "panic", "smash"]
 
 
 def build_kernel(fault_demo: str | None = None) -> Path:
@@ -152,9 +159,33 @@ def build_kernel(fault_demo: str | None = None) -> Path:
         obj = object_for(src)
         run([*nasm, str(src), "-o", str(obj)])
         objs.append(obj)
-    run([TOOLS["ld"], *LDFLAGS, *[str(o) for o in objs], "-o", str(KERNEL_ELF)])
+    link_with_symbols(objs, defines)
     ok(f"Built {KERNEL_ELF}")
     return KERNEL_ELF
+
+
+def link_with_symbols(objs: list[Path], defines: list[str]) -> None:
+    """Link twice: first with an empty symbol table to learn every
+    function's address, then with the real table (scripts/ksyms.py). The
+    table is read-only data, placed after all code, so the second link must
+    not move any function; that is checked rather than assumed."""
+    from ksyms import read_functions, write_table
+    table_c = BUILD_DIR / "ksyms_table.c"
+    table_o = BUILD_DIR / "ksyms_table.o"
+
+    def link(funcs: list[tuple[int, int, str]]) -> None:
+        write_table(funcs, table_c)
+        run([TOOLS["clang"], *CFLAGS, *defines, "-c", str(table_c), "-o", str(table_o)])
+        run([TOOLS["ld"], *LDFLAGS, *[str(o) for o in objs], str(table_o),
+             "-o", str(KERNEL_ELF)])
+
+    link([])
+    funcs = read_functions(KERNEL_ELF)
+    link(funcs)
+    if read_functions(KERNEL_ELF) != funcs:
+        raise BuildError("adding the symbol table moved kernel code; "
+                         "check the section order in linker.ld")
+    ok(f"Symbol table: {len(funcs)} functions")
 
 
 def build_image(kernel_elf: Path) -> Path:
@@ -211,6 +242,22 @@ def run_qemu(image: Path, *, uefi: bool = False) -> int:
     return run(cmd, check=False)
 
 
+def run_debug(image: Path) -> int:
+    """Start QEMU paused, waiting for a debugger on TCP port 1234."""
+    gdb_script = SCRIPTS_DIR / "bharat.gdb"
+    print("[debug] QEMU is paused and waiting for a debugger on localhost:1234.")
+    print("[debug] In a second terminal, from the repo folder, run one of:")
+    print(f"          gdb -x {gdb_script.relative_to(ROOT).as_posix()}")
+    print(f"          lldb {KERNEL_ELF.relative_to(ROOT).as_posix()} "
+          "-o \"gdb-remote 1234\" -o \"breakpoint set -n kernel_main\" -o continue")
+    print("[debug] Serial output appears here. Quit QEMU: Ctrl+A then X.", flush=True)
+    cmd = [TOOLS["qemu"], "-m", "512M",
+           "-drive", f"file={image},format=raw,media=disk,if=ide",
+           "-nographic", "-no-reboot", "-no-shutdown",
+           "-s", "-S"]          # -s: gdb server on :1234, -S: start paused
+    return run(cmd, check=False)
+
+
 def run_test(image: Path) -> int:
     from test_boot import run_boot_test
     return run_boot_test(image)
@@ -244,7 +291,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="build.py",
                                  description="BharatOS build system")
     ap.add_argument("command",
-                    choices=["build", "image", "run", "run-uefi", "test",
+                    choices=["build", "image", "run", "run-uefi", "debug", "test",
                              "test-faults", "clean", "help"],
                     nargs="?", default="build")
     ap.add_argument("--fault-demo", choices=FAULT_DEMOS,
@@ -263,13 +310,15 @@ def main() -> int:
         configure()
         if args.command == "test-faults":
             return run_fault_tests()
-        if args.command in ("build", "image", "run", "run-uefi", "test"):
+        if args.command in ("build", "image", "run", "run-uefi", "debug", "test"):
             kernel = build_kernel(fault_demo=args.fault_demo)
             image = build_image(kernel)
         if args.command == "run":
             return run_qemu(image, uefi=False)
         if args.command == "run-uefi":
             return run_qemu(image, uefi=True)
+        if args.command == "debug":
+            return run_debug(image)
         if args.command == "test":
             return run_test(image)
         return 0

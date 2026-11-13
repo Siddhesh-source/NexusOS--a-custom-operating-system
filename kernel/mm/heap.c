@@ -5,6 +5,7 @@
 #include "kprintf.h"
 #include "panic.h"
 #include "string.h"
+#include "trace.h"
 
 #define MAGIC_USED  0x55534544u   /* "USED" */
 #define MAGIC_FREE  0x46524545u   /* "FREE" */
@@ -108,6 +109,7 @@ static bool grow(uint64_t bytes)
 
     uint64_t old_end = heap_end;
     heap_end += pages * PAGE_SIZE;
+    trace_event(TRACE_HEAP_GROW, heap_end, pages);
 
     if (tail != NULL && tail->magic == MAGIC_FREE) {
         tail->size += heap_end - old_end;

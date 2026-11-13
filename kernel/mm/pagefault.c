@@ -2,6 +2,7 @@
 #include "vmm.h"
 #include "cpu.h"
 #include "kprintf.h"
+#include "trace.h"
 
 extern char mm_probe_read_insn[], mm_probe_write_insn[];
 extern char mm_probe_exec_ret[], mm_probe_fixup[];
@@ -40,6 +41,8 @@ void page_fault_handler(struct interrupt_frame *frame)
         .instruction_fetch = frame->error_code & PF_ERR_IFETCH,
         .reserved_bit = frame->error_code & PF_ERR_RSVD,
     };
+
+    trace_event(TRACE_PAGE_FAULT, info.address, info.rip);
 
     const char *access = info.instruction_fetch ? "instruction fetch"
                        : info.write ? "write" : "read";

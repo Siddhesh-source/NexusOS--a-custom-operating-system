@@ -2,6 +2,7 @@
 #include "cpu.h"
 #include "kprintf.h"
 #include "panic.h"
+#include "trace.h"
 
 /* All scheduler state is touched only with interrupts disabled: from the
  * timer IRQ (IF=0 by the interrupt gate) or inside IRQ_GUARD sections. On a
@@ -19,7 +20,6 @@ static struct thread *idle;
 static bool active;
 static unsigned slice_used;        /* ticks the current thread has run */
 static struct sched_stats stats;
-static unsigned trace_left;
 
 /* ---- intrusive lists ---------------------------------------------------- */
 
@@ -67,16 +67,6 @@ void sched_state_changed(struct thread *t, task_state_t from, task_state_t to)
 
 /* ---- core --------------------------------------------------------------- */
 
-static void trace_switch(const struct thread *from, const struct thread *to, const char *why)
-{
-    if (trace_left == 0)
-        return;
-    trace_left--;
-    kprintf("[SCHED] tick=%lu current=TID %u (%s) next=TID %u (%s) reason=%s switch_count=%lu\n",
-            stats.ticks, from->tid, task_state_str(from->state), to->tid, to->name,
-            why, stats.switches);
-}
-
 /* Pick the next thread and switch to it. Interrupts must be off.
  *
  *   - a RUNNING caller that is preempted/yielding goes to the queue tail
@@ -111,7 +101,9 @@ static void schedule(const char *why, bool preempt)
     }
     if (next == idle)
         stats.idle_switches++;
-    trace_switch(cur, next, why);
+    (void)why;
+    trace_event(preempt ? TRACE_SCHED_PREEMPT : TRACE_SCHED_SWITCH,
+                cur->tid, next->tid);
 
     /* Phase 4 primitive: validates both contexts, updates states (which
      * requeues `cur` if it was RUNNING), switches CR3 if needed, then
@@ -303,10 +295,4 @@ bool sched_check(void)
         }
     }
     return thread_current()->state == TASK_RUNNING;
-}
-
-void sched_set_trace(unsigned lines)
-{
-    IRQ_GUARD();
-    trace_left = lines;
 }

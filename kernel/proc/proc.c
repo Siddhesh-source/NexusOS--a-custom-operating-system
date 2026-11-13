@@ -6,6 +6,7 @@
 #include "kprintf.h"
 #include "panic.h"
 #include "string.h"
+#include "trace.h"
 
 #define PROCESS_MAGIC 0x434F5250u   /* "PROC" */
 #define THREAD_MAGIC  0x44524854u   /* "THRD" */
@@ -361,6 +362,7 @@ struct thread *thread_create(struct process *p, const char *name,
     *link = t;
     p->thread_count++;
     nthread++;
+    trace_event(TRACE_THREAD_CREATE, t->tid, p->pid);
     set_state(t, TASK_READY);
     irq_restore(flags);
 
@@ -430,6 +432,7 @@ void thread_exit(int64_t code)
         panic("thread_exit: the boot thread cannot exit");
 
     t->exit_code = code;
+    trace_event(TRACE_THREAD_EXIT, t->tid, (uint64_t)code);
     set_state(t, TASK_TERMINATED);
 
     /* With the scheduler running, it picks the next READY thread (or idle).
