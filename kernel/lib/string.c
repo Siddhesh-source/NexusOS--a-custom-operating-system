@@ -48,3 +48,41 @@ int strcmp(const char *a, const char *b)
     }
     return (unsigned char)*a - (unsigned char)*b;
 }
+
+size_t strlen(const char *s)
+{
+    size_t n = 0;
+    while (s[n] != '\0')
+        n++;
+    return n;
+}
+
+int strncmp(const char *a, const char *b, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (a[i] != b[i] || a[i] == '\0')
+            return (unsigned char)a[i] - (unsigned char)b[i];
+    }
+    return 0;
+}
+
+size_t strlcpy(char *dst, const char *src, size_t size)
+{
+    size_t len = strlen(src);
+    if (size > 0) {
+        size_t n = len < size - 1 ? len : size - 1;
+        memcpy(dst, src, n);
+        dst[n] = '\0';
+    }
+    return len;
+}
+
+char *strchr(const char *s, int c)
+{
+    for (;; s++) {
+        if (*s == (char)c)
+            return (char *)s;
+        if (*s == '\0')
+            return NULL;
+    }
+}

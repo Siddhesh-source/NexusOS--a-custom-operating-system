@@ -238,3 +238,34 @@ New entries go at the end. Entries 1–7 come from Phases 2–5 (see
   switch path.
 - **Guarding test:** the `context_switch`, `trace_event` and
   `context_switch_par` columns of `docs/benchmarks.md`.
+
+### 18. Reading the boot bundle crashed the kernel (Phase 10)
+- **Symptom:** the first boot with the file bundle stopped with a page
+  fault in `fs_load_tar`, reading the bundle's first byte. The address
+  was a correct direct-map address for the module Limine had loaded.
+- **How found:** the crash report: `[#PF] faulting address :
+  0xffff80001fe29000 (HHDM (direct physical map))`, call trace
+  `fs_load_tar <- kernel_main`.
+- **Root cause:** Limine puts modules in "kernel and modules" memory.
+  Our own page tables (Phase 3) deliberately leave that type out of the
+  direct map, so the kernel image is reachable only through its
+  permission-checked mapping. Limine's address was valid in Limine's page
+  tables, not in ours.
+- **Fix:** map just the bundle's pages, read-only, with `vmm_map_phys`
+  before reading it (the way ACPI tables are mapped).
+- **Guarding test:** `fs_test.c` "the boot bundle was loaded" and
+  "/etc/motd ... came from it", on every boot.
+
+### 19. Enter typed by the test harness never arrived (Phase 10)
+- **Symptom:** the typed-session boot test sent `tester\r` at the login
+  prompt. The name was echoed, then nothing: the shell never saw Enter.
+  Typing by hand in a terminal worked.
+- **How found:** the session log showed `BharatOS login: tester` and no
+  newline; sending `\n` instead worked at once.
+- **Root cause:** QEMU on Windows reads a piped stdin with its own reader
+  that skips `\r` bytes (it expects `\r\n` from some terminals), so a
+  lone `\r` from a pipe is lost. A real terminal sends `\r` and reaches
+  the guest through a different path.
+- **Fix:** the harness sends `\n`. The kernel's serial decoder accepts
+  `\r`, `\n` and `\r\n` as one Enter, so both work.
+- **Guarding test:** the typed session in `python build.py test`.

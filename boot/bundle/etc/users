@@ -1,0 +1,4 @@
+# Who may log in, one per line: name:password
+# A name not listed here may log in with no password.
+# This is a demo, not a security boundary (that comes later).
+admin:bharat

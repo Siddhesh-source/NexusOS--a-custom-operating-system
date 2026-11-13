@@ -269,6 +269,31 @@ def build_tree(fat: Fat32,
     return assign(root, 2, 0, True)
 
 
+def make_bundle(bundle_dir: Path) -> bytes:
+    """The boot bundle: every file under boot/bundle/ in a tar archive
+    (plain ustar, which the kernel's ramfs reads at boot). Sorted and
+    with fixed metadata, so the same files give the same bytes."""
+    import tarfile
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w", format=tarfile.USTAR_FORMAT) as tar:
+        for path in sorted(bundle_dir.rglob("*")):
+            rel = path.relative_to(bundle_dir).as_posix()
+            info = tarfile.TarInfo(rel)
+            info.mtime = 0
+            info.uname = info.gname = ""
+            if path.is_dir():
+                info.type = tarfile.DIRTYPE
+                info.mode = 0o755
+                tar.addfile(info)
+            else:
+                # Unix line ends, even from a Windows checkout.
+                data = path.read_bytes().replace(b"\r\n", b"\n")
+                info.size = len(data)
+                info.mode = 0o644
+                tar.addfile(info, io.BytesIO(data))
+    return out.getvalue()
+
+
 def build_bharat_image(image_path: Path, kernel_elf: Path, limine_dir: Path,
                       limine_exe: Path, boot_dir: Path, size_mb: int) -> None:
     disk_size = size_mb * 1024 * 1024
@@ -300,6 +325,8 @@ def build_bharat_image(image_path: Path, kernel_elf: Path, limine_dir: Path,
                       b"fs0:\r\n\\EFI\\BOOT\\BOOTX64.EFI\r\n", False))
         files.append(("boot/bharat/kernel", "KERNEL", "   ",
                       kernel_elf.read_bytes(), False))
+        files.append(("boot/bharat/bundle.tar", "BUNDLE", "TAR",
+                      make_bundle(boot_dir / "bundle"), False))
 
         root_body = build_tree(fat, files)
         write_dir_data(fat, 2, root_body)

@@ -6,6 +6,7 @@
 #include "idt.h"
 #include "timer.h"
 #include "mm.h"
+#include "vmm.h"
 #include "mm_test.h"
 #include "kstack.h"
 #include "proc.h"
@@ -22,11 +23,20 @@
 #include "clock.h"
 #include "vm_test.h"
 #include "kprintf.h"
+#include "string.h"
 #include "cpu.h"
 #include "percpu.h"
 #include "ipi.h"
 #include "smp.h"
 #include "smp_test.h"
+#include "input.h"
+#include "inputdev.h"
+#include "input_test.h"
+#include "fs.h"
+#include "fs_test.h"
+#include "shell_test.h"
+#include "selftest.h"
+#include "console.h"
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -71,6 +81,11 @@ volatile struct limine_rsdp_request rsdp_request = {
 __attribute__((used, section(".limine_reqs")))
 volatile struct limine_mp_request mp_request = {
     .id = LIMINE_MP_REQUEST_ID, .revision = 0, .flags = 0,   /* xAPIC mode */
+};
+
+__attribute__((used, section(".limine_reqs")))
+volatile struct limine_module_request module_request = {
+    .id = LIMINE_MODULE_REQUEST_ID, .revision = 0,
 };
 
 __attribute__((used, section(".limine_reqs_end")))
@@ -156,6 +171,39 @@ __attribute__((noinline)) static void run_fault_demo(void)
 #endif
 }
 
+/* Fill the in-memory file system from the boot bundle: a tar archive
+ * that Limine loads next to the kernel (boot/limine.conf). Without it the
+ * system still runs, with empty folders. */
+static bool fs_bundle_loaded;
+
+static void load_boot_bundle(void)
+{
+    fs_init();
+    struct limine_module_response *r = module_request.response;
+    for (uint64_t i = 0; r != NULL && i < r->module_count; i++) {
+        struct limine_file *f = r->modules[i];
+        if (f->string == NULL || strcmp(f->string, "bundle") != 0)
+            continue;
+        /* Modules sit next to the kernel image, which the direct map
+         * leaves out on purpose; map just the bundle, read-only. */
+        const void *data = vmm_map_phys((uint64_t)f->address - hhdm_offset, f->size, 0);
+        if (data == NULL) {
+            kprintf("[fs] cannot map the boot bundle; starting with empty folders\n");
+            return;
+        }
+        int n = fs_load_tar(data, f->size);
+        if (n < 0) {
+            kprintf("[fs] boot bundle is damaged; some files may be missing\n");
+        } else {
+            kprintf("[fs] Files in memory: %d files loaded from the boot bundle (%lu bytes)\n",
+                    n, f->size);
+            fs_bundle_loaded = true;
+        }
+        return;
+    }
+    kprintf("[fs] no boot bundle; starting with empty folders\n");
+}
+
 /* Mirror the console to the screen, if the bootloader set up a
  * framebuffer we can draw on. */
 static void start_screen_console(void)
@@ -178,7 +226,7 @@ void kernel_main(void)
 
     serial_puts("\n============================================\n");
     serial_puts("           B H A R A T   O S\n");
-    serial_puts("  Phase 9: Multi-core\n");
+    serial_puts("  Phase 10: V1 core (input, files, login, terminal)\n");
     serial_puts("============================================\n\n");
 
     serial_puts("[boot] CPU entered long mode (64-bit).\n");
@@ -280,6 +328,23 @@ void kernel_main(void)
      * per-CPU queues with work stealing). */
     bool smp_ok = smp_run_tests();
 
+    /* Phase 10: V1 core. Keyboard, mouse and serial input. */
+    inputdev_init();
+    bool input_ok = input_run_tests();
+
+    /* Phase 10: files in memory, seeded from the boot bundle. */
+    load_boot_bundle();
+    bool fs_ok = fs_run_tests(fs_bundle_loaded);
+    {
+        struct fbcon_info fi;
+        fbcon_get_info(&fi);
+        if (fi.active)
+            input_set_screen((int32_t)fi.width, (int32_t)fi.height);
+    }
+
+    /* Phase 10: login rules, line editor and the shell's commands. */
+    bool shell_ok = shell_run_tests();
+
     serial_puts("\n[ok] Kernel started successfully.\n");
     if (mm_ok)
         serial_puts("[ok] Phase 3 memory management verified.\n");
@@ -309,6 +374,23 @@ void kernel_main(void)
         serial_puts("[ok] Phase 9 multi-core verified.\n");
     else
         serial_puts("[FAIL] Phase 9 multi-core tests reported failures.\n");
+    if (input_ok)
+        serial_puts("[ok] Phase 10 input verified.\n");
+    else
+        serial_puts("[FAIL] Phase 10 input tests reported failures.\n");
+    if (fs_ok)
+        serial_puts("[ok] Phase 10 files in memory verified.\n");
+    else
+        serial_puts("[FAIL] Phase 10 file tests reported failures.\n");
+    if (shell_ok)
+        serial_puts("[ok] Phase 10 login and shell verified.\n");
+    else
+        serial_puts("[FAIL] Phase 10 login and shell tests reported failures.\n");
+    {
+        unsigned passed, failed;
+        selftest_totals(&passed, &failed);
+        kprintf("[ok] %u boot self-checks passed, %u failed.\n", passed, failed);
+    }
 
     bench_run();          /* only does something in the bench build */
     run_fault_demo();
@@ -316,10 +398,12 @@ void kernel_main(void)
     /* From here on every CPU shares the work. */
     sched_set_stealing(true);
 
-    /* Heartbeat: a dot per second. kmain sleeps in between, so the idle
-     * thread (not this loop) is what halts the CPU. */
+    /* V1: the console app (login, then the shell). kmain then just checks
+     * on it once a second and restarts it if it crashed; it sleeps in
+     * between, so the idle thread (not this loop) halts the CPU. */
+    console_start();
     for (;;) {
         sched_sleep(SCHED_TIMER_HZ);
-        serial_puts(".");
+        console_watch();
     }
 }

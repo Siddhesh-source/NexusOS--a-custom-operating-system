@@ -1,4 +1,5 @@
 #include "vm_test.h"
+#include "selftest.h"
 #include "pmm.h"
 #include "slab.h"
 #include "vm.h"
@@ -320,5 +321,6 @@ bool vm_run_tests(void)
     kprintf("\n");
     slab_print_all();
     kprintf("\n===== Memory tests: %u passed, %u failed =====\n", passed, failed);
+    selftest_record("Memory that scales", passed, failed);
     return failed == 0;
 }

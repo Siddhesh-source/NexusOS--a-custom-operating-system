@@ -1,4 +1,5 @@
 #include "debug_test.h"
+#include "selftest.h"
 #include "backtrace.h"
 #include "trace.h"
 #include "kernel.h"
@@ -221,6 +222,7 @@ bool debug_run_tests(void)
     test_heap_poison();
     test_trace();
     kprintf("\n===== Debug tests: %u passed, %u failed =====\n", passed, failed);
+    selftest_record("Debug and hardening", passed, failed);
     return failed == 0;
 }
 

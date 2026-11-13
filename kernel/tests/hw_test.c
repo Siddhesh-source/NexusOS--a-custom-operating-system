@@ -1,4 +1,5 @@
 #include "hw_test.h"
+#include "selftest.h"
 #include "acpi.h"
 #include "pci.h"
 #include "fbcon.h"
@@ -280,5 +281,6 @@ bool hw_run_tests(void)
     test_tickless_idle();
     test_ioapic_routing();
     kprintf("\n===== Hardware tests: %u passed, %u failed =====\n", passed, failed);
+    selftest_record("Modern hardware", passed, failed);
     return failed == 0;
 }

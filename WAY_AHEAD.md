@@ -3,17 +3,22 @@
 Where BharatOS is, what comes next, and why. The detailed plan is
 `docs/UPDATES.md` §7; this is the short version.
 
-## Where we are (Phases 1–9 done)
+## Where we are (Phases 1–10 done)
 
 A from-scratch x86-64 kernel that boots on BIOS and UEFI and runs on every
 CPU. It has:
 - memory management (buddy, slab, heap, demand paging, copy-on-write);
 - threads and a tickless scheduler with per-CPU queues and work stealing;
 - spinlocks with a lock-order checker, TLB shootdown and RCU;
-- 382 self-checks on every boot, 13 crash demos with symbolised reports,
-  host unit tests, benchmarks and CI.
+- 516 self-checks on every boot, 13 crash demos with symbolised reports,
+  host unit tests, benchmarks and CI;
+- **V1 core (Phase 10):** keyboard, mouse and terminal input; files in
+  memory loaded from a boot bundle; login with your name; a shell with
+  24 commands (`ls cat echo > cpus top checks lockdemo crashdemo` ...);
+  crashes of a demo thread reported and contained.
 
-There is nothing to *show* yet beyond text on a serial console.
+`python build.py run`, log in with any name and type `help`. What is
+still missing for the demo is the graphical desktop (Phase 11).
 
 ## What comes next: V1, a demo-ready OS
 
@@ -24,7 +29,7 @@ boot splash  →  login: type your name  →  desktop with your name on the task
   → Terminal: ls, cat, echo > file, cpus, checks
   → Files: browse, open, create, delete
   → System Monitor: 4 CPUs working live, work being stolen between them
-  → Health: 382 boot checks passed, lock-order checker catching a mistake,
+  → Health: 516 boot checks passed, lock-order checker catching a mistake,
             a crash report with a call trace
 ```
 

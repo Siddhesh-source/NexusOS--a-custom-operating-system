@@ -10,5 +10,11 @@ void *memcpy(void *dst, const void *src, size_t n);
 void *memmove(void *dst, const void *src, size_t n);
 int memcmp(const void *a, const void *b, size_t n);
 int strcmp(const char *a, const char *b);
+size_t strlen(const char *s);
+int strncmp(const char *a, const char *b, size_t n);
+/* Copy with truncation; dst is always 0-terminated (size > 0). Returns
+ * strlen(src), so a result >= size means it was cut short. */
+size_t strlcpy(char *dst, const char *src, size_t size);
+char *strchr(const char *s, int c);
 
 #endif /* BHARAT_STRING_H */

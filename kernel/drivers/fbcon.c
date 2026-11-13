@@ -68,6 +68,10 @@ static struct {
     uint32_t fg, bg;            /* in the framebuffer's pixel format */
     uint32_t utf8_cp;           /* code point being decoded */
     unsigned utf8_left;         /* continuation bytes still expected */
+    uint8_t esc;                /* 0 normal, 1 after ESC, 2 inside ESC [ */
+    unsigned esc_num;           /* number inside ESC [ n X */
+    bool cursor_shown;
+    unsigned cursor_col, cursor_row;
 } fb;
 
 static struct fbcon_info st;
@@ -138,12 +142,60 @@ static char from_code_point(uint32_t cp)
     return '?';
 }
 
-void fbcon_putc(char ch)
+/* The cursor: the bottom two pixel rows of the next character cell,
+ * inverted. Inverting again removes it without knowing what is under. */
+static void cursor_flip(unsigned col, unsigned row)
 {
-    if (!st.active)
+    if (col >= st.cols || row >= st.rows)
         return;
-    /* Called with the console lock held (from serial_putchar's mirror). */
-    uint8_t c = (uint8_t)ch;
+    for (unsigned r = CELL_H - 2; r < CELL_H; r++) {
+        uint32_t *p = pixel((uint64_t)col * CELL_W, (uint64_t)row * CELL_H + r);
+        for (unsigned b = 0; b < CELL_W; b++)
+            p[b] = p[b] == fb.fg ? fb.bg : fb.fg;
+    }
+}
+
+static void clear_screen(void)
+{
+    for (unsigned r = 0; r < st.rows; r++)
+        clear_row(r);
+    st.col = st.row = 0;
+}
+
+/* ESC [ n J (clear screen), ESC [ H (top left), ESC [ K (clear to the end
+ * of the line). Other sequences are swallowed so they never show as text. */
+static void escape_byte(uint8_t c)
+{
+    if (fb.esc == 1) {
+        fb.esc = c == '[' ? 2 : 0;
+        fb.esc_num = 0;
+        return;
+    }
+    if (c >= '0' && c <= '9') {
+        fb.esc_num = fb.esc_num * 10 + (c - '0');
+        return;
+    }
+    if (c == ';' || c == '?')
+        return;
+    fb.esc = 0;
+    if (c == 'J' && fb.esc_num == 2) {
+        clear_screen();
+    } else if (c == 'H') {
+        st.col = st.row = 0;
+    } else if (c == 'K') {
+        unsigned col = st.col;
+        while (st.col < st.cols)
+            put_visible(' ');
+        st.col = col;
+    }
+}
+
+static void putc_inner(uint8_t c)
+{
+    if (fb.esc != 0) {
+        escape_byte(c);
+        return;
+    }
     if (fb.utf8_left > 0) {
         if ((c & 0xC0) == 0x80) {
             fb.utf8_cp = (fb.utf8_cp << 6) | (c & 0x3F);
@@ -159,6 +211,8 @@ void fbcon_putc(char ch)
         return;
     }
     switch (c) {
+    case 0x1B: fb.esc = 1; break;
+    case '\b': if (st.col > 0) st.col--; break;
     case '\n': newline(); break;
     case '\r': st.col = 0; break;
     case '\t': do { put_visible(' '); } while (st.col % 8 != 0 && st.col < st.cols); break;
@@ -167,6 +221,22 @@ void fbcon_putc(char ch)
             put_visible((char)c);
         break;
     }
+}
+
+void fbcon_putc(char ch)
+{
+    if (!st.active)
+        return;
+    /* Called with the console lock held (from serial_putchar's mirror).
+     * The cursor is removed before anything changes and drawn again
+     * after, so it never leaves marks behind. */
+    if (fb.cursor_shown)
+        cursor_flip(fb.cursor_col, fb.cursor_row);
+    putc_inner((uint8_t)ch);
+    fb.cursor_col = st.col;
+    fb.cursor_row = st.row;
+    cursor_flip(fb.cursor_col, fb.cursor_row);
+    fb.cursor_shown = true;
 }
 
 bool fbcon_init(void *addr, uint64_t width, uint64_t height, uint64_t pitch,

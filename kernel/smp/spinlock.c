@@ -21,6 +21,11 @@ static const char *const class_names[LOCK_CLASS_COUNT] = {
     [LOCK_CLASS_TEST]     = "test",
     [LOCK_CLASS_TEST_A]   = "test A",
     [LOCK_CLASS_TEST_B]   = "test B",
+    [LOCK_CLASS_WAITQ]    = "wait queue",
+    [LOCK_CLASS_INPUT]    = "input queue",
+    [LOCK_CLASS_FS]       = "file system",
+    [LOCK_CLASS_DEMO_A]   = "demo A",
+    [LOCK_CLASS_DEMO_B]   = "demo B",
 };
 
 const char *lock_class_name(unsigned c)

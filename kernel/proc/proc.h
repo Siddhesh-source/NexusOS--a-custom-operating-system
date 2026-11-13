@@ -128,9 +128,14 @@ struct thread {
     volatile bool kill;           /* terminate at the next scheduling point */
     uint8_t flags;                /* THREAD_* */
     uint32_t ran_on;              /* bit mask of CPUs it has run on */
+
+    /* Wait queue this thread sleeps on (waitq.c), guarded by its run-queue
+     * lock; NULL when not waiting. */
+    const void *wait_on;
 };
 
 #define THREAD_IDLE       (1u << 0)  /* a CPU's idle thread */
+#define THREAD_CONTAIN    (1u << 1)  /* a crash in it ends only the thread (crash demo) */
 #define THREAD_ANY_CPU    (~0u)      /* thread_create_on: no pinning */
 
 /* Which scheduler list a thread is on (struct thread.sched_list). */

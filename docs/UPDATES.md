@@ -252,7 +252,7 @@ boot, bad-input tests, a one-minute demo, and docs. **New rules:**
 | 7 | Modern hardware ✅ done | serious OS | L |
 | 8 | Memory that scales ✅ done | serious OS | L |
 | 9 | Multi-core ✅ done | concurrency | L |
-| **10** | **V1 core: input, files, login, terminal** | demo | M |
+| 10 | V1 core: input, files, login, terminal ✅ done | demo | M |
 | **11** | **V1 desktop and demo** | demo, all USPs visible | M |
 | **12** | **V1 hardening: thorough tests, fixes, polish** | quality | M |
 | 13 (was 10) | User mode, handles and async rings | security, performance | L |
@@ -399,6 +399,14 @@ heading). Nothing was deleted.
 | 13–23 | the old Phases 10–20, same content, in the same order | — |
 
 ### Phase 10: V1 core: input, files, login, terminal
+**Status: ✅ done.** See `phases/phase-10-v1-core.md`. Added beyond the
+list below: serial input decoded to the same key events (so the shell
+works in a terminal as well as a QEMU window), wait queues, contained
+crashes for opted-in threads (D30), and a boot test that types at the
+real login prompt over serial and the PS/2 keyboard. Left for later:
+cursor movement inside a line, key repeat, mouse wheel, saving files
+(Phase 17).
+
 **Goal:** everything the desktop needs underneath, usable from a text
 terminal on the screen console.
 1. **Keyboard:** PS/2 keyboard driver on IRQ 1 through the I/O APIC
@@ -786,7 +794,10 @@ the fs and net services enforce their rates.
 ### 8.8 New repo folders (create when the phase starts)
 
 ```text
-kernel/obj/        objects, handle tables            (Ph 10)
+kernel/input/      input queue, keyboard/mouse/serial decoders (Ph 10, created)
+kernel/fs/         ramfs and the boot bundle loader  (Ph 10, created)
+kernel/apps/       V1 apps as kernel threads: console, shell (Ph 10, created)
+kernel/obj/        objects, handle tables            (Ph 13)
 kernel/ring/       async rings                       (Ph 10)
 kernel/ipc/        channels, shared memory           (Ph 11)
 kernel/smp/        CPU bring-up, per-CPU, locks, RCU (Ph 9)
@@ -861,6 +872,10 @@ operation, ring batch of 64, IPC round trip, page fault, 4 KiB file read
 | D26 | Work stealing by idle CPUs (try-lock), placement on the least-loaded CPU, idle CPUs woken by IPI in rotation | simple, no periodic balancer tick (stays tickless) | periodic load balancer | priorities or NUMA arrive |
 | D28 | V1 first: a demo-ready OS (input, ramfs, login, shell, desktop) before user mode, IPC and BharatFS; V1 apps run as kernel threads behind small APIs | something to show end to end now; the kernel core is solid enough; the APIs keep the later move to user mode mechanical | finish the microkernel first (months without a visible result) | V1 is hardened (Phase 12) |
 | D29 | ramfs seeded from a read-only boot bundle for V1 | files work at once with no disk driver | ATA driver now (thrown away later) | BharatFS (Phase 17) |
+| D30 | A fault in a kernel thread that opted in (`THREAD_CONTAIN`) ends only that thread, after the full report; refused if it holds a lock or the fault is #DF/NMI/#MC | `crashdemo` and V1 apps can crash without taking the demo down; kernel threads that did not opt in still halt, so real bugs stay loud | halt on every fault (no live crash demo); contain every kernel fault (hides kernel bugs) | apps move to user mode (Phase 13): a ring-3 fault kills the process instead |
+| D31 | Serial input decoded into the same key events as the PS/2 keyboard | the shell works in `-nographic` terminals, CI and the typed boot test, with one code path for apps | PS/2 only (no typing in a terminal) | — |
+| D32 | ramfs: one spinlock for the whole tree, file data copied while holding it, fixed limits (256 KiB file, 8 MiB total, 1024 nodes, 32 open) | simplest design that works for small V1 files; limits make "full" testable | per-node locks or a sleeping lock | files get large or many threads use files at once (BharatFS, Phase 17) |
+| D33 | Wait queues remember sleepers by thread ID and check `wait_on` before waking | a sleeper killed meanwhile leaves no dangling pointer; a reused ID is never woken by mistake | pointer lists with removal on kill | many sleepers per queue (raise WAITQ_MAX or use lists) |
 | D27 | Boot tests run QEMU's CPUs on one host thread (`thread=single`) | results do not depend on how busy the host is; parallel runs remain a manual stress and the bench mode | `thread=multi` in every test (flaky timing checks) | CI gets KVM |
 | D22 | Keep the buddy allocator even though a next-fit bitmap is faster for single pages (16 vs 37 cycles natively) | contiguous blocks, per-page reference counts for COW, steady under fragmentation; a 64-page hot cache covers the common case | keep the bitmap | single-page allocation shows up in profiles (per-CPU caches; not needed in Phase 9: the page allocator is not on the switch path, revisit with user processes) |
 

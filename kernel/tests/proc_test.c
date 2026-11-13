@@ -1,4 +1,5 @@
 #include "proc_test.h"
+#include "selftest.h"
 #include "proc.h"
 #include "pmm.h"
 #include "heap.h"
@@ -795,5 +796,6 @@ bool proc_run_tests(void)
     kprintf("\n[BHARAT] Process table after all tests (only the kernel remains):\n");
     proc_dump_table();
     print_summary();
+    selftest_record("Processes and threads", passed, failed);
     return failed == 0;
 }

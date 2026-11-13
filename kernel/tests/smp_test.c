@@ -4,6 +4,7 @@
  * (with less to prove) when QEMU gives the kernel a single CPU. */
 
 #include "smp_test.h"
+#include "selftest.h"
 #include "percpu.h"
 #include "spinlock.h"
 #include "ipi.h"
@@ -633,5 +634,6 @@ bool smp_run_tests(void)
     test_dashboard();
     sched_set_stealing(false);       /* later demos and benches expect one CPU */
     kprintf("\n===== Multi-core tests: %u passed, %u failed =====\n", passed, failed);
+    selftest_record("Multi-core", passed, failed);
     return failed == 0;
 }
