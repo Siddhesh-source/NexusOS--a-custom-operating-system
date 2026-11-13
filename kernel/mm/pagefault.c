@@ -3,6 +3,7 @@
 #include "cpu.h"
 #include "kprintf.h"
 #include "trace.h"
+#include "vm.h"
 
 extern char mm_probe_read_insn[], mm_probe_write_insn[];
 extern char mm_probe_exec_ret[], mm_probe_fixup[];
@@ -31,6 +32,12 @@ bool fault_try_fixup(struct interrupt_frame *frame)
 
 void page_fault_handler(struct interrupt_frame *frame)
 {
+    /* Most user-half faults are expected: first touch of a reserved page
+     * (demand paging) or a write to a shared copy-on-write page. Those
+     * are resolved silently and the access is retried. */
+    if (vm_handle_fault(read_cr2(), frame->error_code))
+        return;
+
     struct page_fault_info info = {
         .address = read_cr2(),
         .rip = frame->rip,

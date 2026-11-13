@@ -283,6 +283,7 @@ vmm_status_t vmm_create_address_space(address_space_t *out)
         dst[i] = src[i];
 
     out->pml4_phys = pml4;
+    out->regions = NULL;
     return VMM_OK;
 }
 

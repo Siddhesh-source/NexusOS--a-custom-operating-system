@@ -20,6 +20,7 @@
 #include "hw_test.h"
 #include "apic.h"
 #include "clock.h"
+#include "vm_test.h"
 #include "kprintf.h"
 #include "cpu.h"
 
@@ -250,6 +251,9 @@ void kernel_main(void)
     /* Phase 7: modern hardware (ACPI, PCI, screen console, APIC timer). */
     bool hw_ok = hw_run_tests();
 
+    /* Phase 8: buddy allocator, slab caches, demand paging, copy-on-write. */
+    bool vm_ok = vm_run_tests();
+
     serial_puts("\n[ok] Kernel started successfully.\n");
     if (mm_ok)
         serial_puts("[ok] Phase 3 memory management verified.\n");
@@ -271,6 +275,10 @@ void kernel_main(void)
         serial_puts("[ok] Phase 7 modern hardware verified.\n");
     else
         serial_puts("[FAIL] Phase 7 hardware tests reported failures.\n");
+    if (vm_ok)
+        serial_puts("[ok] Phase 8 memory that scales verified.\n");
+    else
+        serial_puts("[FAIL] Phase 8 memory tests reported failures.\n");
 
     bench_run();          /* only does something in the bench build */
     run_fault_demo();

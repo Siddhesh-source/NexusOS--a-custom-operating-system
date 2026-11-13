@@ -147,6 +147,13 @@ void thread_exit(int64_t code) __attribute__((noreturn));
  * threads. Returns the number of threads reclaimed. */
 unsigned proc_reap(void);
 
+/* Give empty slab pages of the thread/process caches back to the page
+ * allocator (they are otherwise kept for reuse). */
+void proc_trim_caches(void);
+
+/* Pages currently held by the thread and process slab caches. */
+uint64_t proc_cache_pages(void);
+
 /* ---- switching and state ---------------------------------------------- */
 
 /* Suspend the calling thread (RUNNING -> READY, unless it already set

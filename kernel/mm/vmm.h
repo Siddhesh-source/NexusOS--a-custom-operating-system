@@ -37,8 +37,11 @@ typedef enum {
     VMM_ERR_INVALID,         /* bad argument (flags, address space, phys) */
 } vmm_status_t;
 
+struct vm_region;
+
 typedef struct address_space {
     uint64_t pml4_phys;
+    struct vm_region *regions;   /* user-half regions (vm.c), by address */
 } address_space_t;
 
 /* Build the kernel page tables from the boot memory map and switch to them. */

@@ -4,68 +4,96 @@
 #include "panic.h"
 #include "string.h"
 
-#define BITS_PER_WORD 64
+/* One record per frame, from physical address 0 to the end of the highest
+ * usable region. Free blocks are linked through their first frame's
+ * record by frame number (32 bits is plenty: 2^32 frames = 16 TiB). */
+struct pmm_page {
+    uint32_t next, prev;      /* free-list links (block heads only) */
+    uint16_t refcount;        /* users of an allocated single page */
+    uint8_t order;            /* block order (free heads, allocated heads) */
+    uint8_t flags;
+};
 
-static uint64_t *bitmap;          /* HHDM pointer to the bitmap */
-static uint64_t bitmap_words;
-static uint64_t bitmap_phys;
-static uint64_t bitmap_bytes;
-static uint64_t frame_count;      /* frames covered by the bitmap */
-static uint64_t next_word;        /* next-fit search hint */
+#define PG_MANAGED    0x01    /* usable RAM owned by the allocator */
+#define PG_ALLOCATED  0x02    /* part of an allocated block */
+#define PG_FREE_HEAD  0x04    /* first frame of a free block */
+#define PG_HEAD       0x08    /* first frame of an allocated block */
+#define NONE          0xFFFFFFFFu
 
+_Static_assert(sizeof(struct pmm_page) == 12, "frame record must stay small");
+
+static struct pmm_page *pages;    /* HHDM pointer to the records */
+static uint64_t pages_phys, pages_bytes;
+static uint64_t frame_count;
+static uint32_t free_head[PMM_MAX_ORDER + 1];
+static uint64_t free_blocks[PMM_MAX_ORDER + 1];
 static uint64_t free_pages;
 static uint64_t managed_pages;
 static uint64_t total_bytes;
 static uint64_t usable_bytes;
 static uint64_t non_ram_bytes;
 
-/* Copy of the usable ranges (page-aligned inward), used to validate frees. */
-static struct { uint64_t start, end; } usable[MM_MAX_REGIONS];
-static size_t usable_count;
+/* Hot-page cache: recently freed single pages, kept off the buddy lists
+ * and handed out first. Most page allocations are single pages that are
+ * soon freed again; without the cache each one would split a large block
+ * down to one page and merge it all the way back up. The cache drains
+ * into the buddy lists when it is full or a larger block is needed.
+ * Its pages count as free. */
+#define HOT_MAX 64
+static uint32_t hot[HOT_MAX];
+static unsigned hot_count;
 
-static inline bool bit_test(uint64_t frame)
+/* ---- free lists ---------------------------------------------------------- */
+
+static void list_push(uint32_t f, unsigned order)
 {
-    return (bitmap[frame / BITS_PER_WORD] >> (frame % BITS_PER_WORD)) & 1;
+    struct pmm_page *p = &pages[f];
+    p->flags |= PG_FREE_HEAD;
+    p->order = (uint8_t)order;
+    p->prev = NONE;
+    p->next = free_head[order];
+    if (free_head[order] != NONE)
+        pages[free_head[order]].prev = f;
+    free_head[order] = f;
+    free_blocks[order]++;
 }
 
-static inline void bit_set(uint64_t frame)
+static void list_remove(uint32_t f, unsigned order)
 {
-    bitmap[frame / BITS_PER_WORD] |= 1ULL << (frame % BITS_PER_WORD);
+    struct pmm_page *p = &pages[f];
+    if (p->prev != NONE)
+        pages[p->prev].next = p->next;
+    else
+        free_head[order] = p->next;
+    if (p->next != NONE)
+        pages[p->next].prev = p->prev;
+    p->flags &= ~PG_FREE_HEAD;
+    p->next = p->prev = NONE;
+    free_blocks[order]--;
 }
 
-static inline void bit_clear(uint64_t frame)
+/* Put block (f, order) on the free lists, merging with its buddy for as
+ * long as the buddy is a free block of the same size. */
+static void release_block(uint32_t f, unsigned order)
 {
-    bitmap[frame / BITS_PER_WORD] &= ~(1ULL << (frame % BITS_PER_WORD));
-}
-
-/* A frame is managed if it lies in a usable region and is not one of the
- * permanently reserved frames (page 0, the bitmap). */
-static bool frame_is_managed(uint64_t phys)
-{
-    if (phys == 0)
-        return false;
-    if (phys >= bitmap_phys && phys < bitmap_phys + PAGE_ALIGN_UP(bitmap_bytes))
-        return false;
-    for (size_t i = 0; i < usable_count; i++) {
-        if (phys >= usable[i].start && phys < usable[i].end)
-            return true;
+    while (order < PMM_MAX_ORDER) {
+        uint32_t buddy = f ^ (1u << order);
+        if (buddy >= frame_count || !(pages[buddy].flags & PG_FREE_HEAD)
+            || pages[buddy].order != order)
+            break;
+        list_remove(buddy, order);
+        f = f < buddy ? f : buddy;          /* merged block starts at the lower */
+        order++;
     }
-    return false;
+    list_push(f, order);
 }
 
-/* Mark a frame permanently reserved (used by init only). */
-static void reserve_frame(uint64_t phys)
-{
-    uint64_t frame = phys >> PAGE_SHIFT;
-    if (frame < frame_count && !bit_test(frame)) {
-        bit_set(frame);
-        free_pages--;
-        managed_pages--;
-    }
-}
+/* ---- init --------------------------------------------------------------- */
 
 void pmm_init(const struct boot_mem_info *info)
 {
+    struct { uint64_t start, end; } usable[MM_MAX_REGIONS];
+    size_t usable_count = 0;
     uint64_t highest = 0;
 
     kprintf("[pmm] Physical memory map (%lu regions):\n", (uint64_t)info->region_count);
@@ -74,7 +102,6 @@ void pmm_init(const struct boot_mem_info *info)
         kprintf("[pmm]   %016lx - %016lx  %8lu KiB  %s\n",
                 r->base, r->base + r->length, r->length / 1024,
                 mem_region_type_name(r->type));
-
         /* "Reserved" and framebuffer entries describe address ranges
          * (firmware, MMIO), not installed RAM; keep them out of the total. */
         if (r->type == MEM_RESERVED || r->type == MEM_FRAMEBUFFER)
@@ -84,7 +111,6 @@ void pmm_init(const struct boot_mem_info *info)
         if (r->type != MEM_USABLE)
             continue;
         usable_bytes += r->length;
-
         uint64_t start = PAGE_ALIGN_UP(r->base);
         uint64_t end = PAGE_ALIGN_DOWN(r->base + r->length);
         if (end <= start)
@@ -97,73 +123,111 @@ void pmm_init(const struct boot_mem_info *info)
         if (end > highest)
             highest = end;
     }
-
     if (usable_count == 0)
         panic("pmm: no usable memory reported by the bootloader");
+    if ((highest >> PAGE_SHIFT) >= NONE)
+        panic("pmm: more physical memory than the frame records can index");
 
     frame_count = highest >> PAGE_SHIFT;
-    bitmap_words = (frame_count + BITS_PER_WORD - 1) / BITS_PER_WORD;
-    bitmap_bytes = bitmap_words * sizeof(uint64_t);
+    pages_bytes = frame_count * sizeof(struct pmm_page);
 
-    /* Place the bitmap at the start of the first usable region big enough. */
-    bitmap_phys = 0;
+    /* Place the records at the start of the first usable region big enough. */
+    pages_phys = 0;
     for (size_t i = 0; i < usable_count; i++) {
         uint64_t start = usable[i].start == 0 ? PAGE_SIZE : usable[i].start;
-        if (usable[i].end > start && usable[i].end - start >= PAGE_ALIGN_UP(bitmap_bytes)) {
-            bitmap_phys = start;
+        if (usable[i].end > start && usable[i].end - start >= PAGE_ALIGN_UP(pages_bytes)) {
+            pages_phys = start;
             break;
         }
     }
-    if (bitmap_phys == 0)
-        panic("pmm: no usable region large enough for the frame bitmap");
+    if (pages_phys == 0)
+        panic("pmm: no usable region large enough for the frame records");
+    pages = phys_to_virt(pages_phys);
+    memset(pages, 0, pages_bytes);
+    for (unsigned o = 0; o <= PMM_MAX_ORDER; o++) {
+        free_head[o] = NONE;
+        free_blocks[o] = 0;
+    }
 
-    bitmap = phys_to_virt(bitmap_phys);
-
-    /* Start with everything reserved, then release usable frames. */
-    memset(bitmap, 0xFF, bitmap_bytes);
+    /* Mark usable frames managed, except page 0 (the failure value) and
+     * the frames holding the records, then free them one by one: merging
+     * builds the large blocks automatically. */
+    uint64_t rec_end = pages_phys + PAGE_ALIGN_UP(pages_bytes);
+    free_pages = managed_pages = 0;
     for (size_t i = 0; i < usable_count; i++) {
         for (uint64_t p = usable[i].start; p < usable[i].end; p += PAGE_SIZE) {
-            bit_clear(p >> PAGE_SHIFT);
+            if (p == 0 || (p >= pages_phys && p < rec_end))
+                continue;
+            uint32_t f = (uint32_t)(p >> PAGE_SHIFT);
+            pages[f].flags = PG_MANAGED;
+            pages[f].next = pages[f].prev = NONE;
+            release_block(f, 0);
             free_pages++;
             managed_pages++;
         }
     }
 
-    reserve_frame(0);   /* keeps 0 usable as the failure sentinel */
-    for (uint64_t off = 0; off < PAGE_ALIGN_UP(bitmap_bytes); off += PAGE_SIZE)
-        reserve_frame(bitmap_phys + off);
-
-    next_word = 0;
-
-    kprintf("[pmm] Bitmap: %lu frames tracked, %lu bytes at phys %p\n",
-            frame_count, bitmap_bytes, (void *)bitmap_phys);
+    kprintf("[pmm] Buddy allocator: %lu frames tracked, %lu KiB of frame records at phys %p\n",
+            frame_count, pages_bytes / 1024, (void *)pages_phys);
     pmm_print_stats();
+}
+
+/* ---- allocation ---------------------------------------------------------- */
+
+static void drain_hot(unsigned keep)
+{
+    while (hot_count > keep)
+        release_block(hot[--hot_count], 0);
+}
+
+static uint32_t alloc_block(unsigned order)
+{
+    if (order == 0 && hot_count > 0) {
+        uint32_t f = hot[--hot_count];
+        pages[f].flags = PG_MANAGED | PG_ALLOCATED | PG_HEAD;
+        pages[f].order = 0;
+        pages[f].refcount = 1;
+        free_pages--;
+        return f;
+    }
+    unsigned o = order;
+    while (o <= PMM_MAX_ORDER && free_head[o] == NONE)
+        o++;
+    if (o > PMM_MAX_ORDER && hot_count > 0) {
+        drain_hot(0);                       /* cached pages may merge into a fit */
+        for (o = order; o <= PMM_MAX_ORDER && free_head[o] == NONE; o++)
+            ;
+    }
+    if (o > PMM_MAX_ORDER)
+        return NONE;
+    uint32_t f = free_head[o];
+    list_remove(f, o);
+    while (o > order) {                     /* split, keeping the lower half */
+        o--;
+        list_push(f + (1u << o), o);
+    }
+    uint32_t n = 1u << order;
+    for (uint32_t i = 0; i < n; i++)
+        pages[f + i].flags = PG_MANAGED | PG_ALLOCATED;
+    pages[f].flags |= PG_HEAD;
+    pages[f].order = (uint8_t)order;
+    pages[f].refcount = 1;
+    free_pages -= n;
+    return f;
+}
+
+uint64_t pmm_alloc_pages(unsigned order)
+{
+    if (order > PMM_MAX_ORDER)
+        return 0;
+    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    uint32_t f = alloc_block(order);
+    return f == NONE ? 0 : (uint64_t)f << PAGE_SHIFT;
 }
 
 uint64_t pmm_alloc_page(void)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
-    if (free_pages == 0)
-        return 0;
-
-    for (uint64_t n = 0; n < bitmap_words; n++) {
-        uint64_t w = (next_word + n) % bitmap_words;
-        if (bitmap[w] == ~0ULL)
-            continue;
-
-        uint64_t bit = (uint64_t)__builtin_ctzll(~bitmap[w]);
-        uint64_t frame = w * BITS_PER_WORD + bit;
-        if (frame >= frame_count)
-            continue;   /* padding bits in the last word */
-
-        bit_set(frame);
-        free_pages--;
-        next_word = w;
-        return frame << PAGE_SHIFT;
-    }
-
-    /* free_pages said otherwise: the bitmap and counter disagree. */
-    panic("pmm: free page counter out of sync with bitmap");
+    return pmm_alloc_pages(0);
 }
 
 uint64_t pmm_alloc_zeroed_page(void)
@@ -174,33 +238,105 @@ uint64_t pmm_alloc_zeroed_page(void)
     return phys;
 }
 
-pmm_status_t pmm_free_page(uint64_t phys)
+/* ---- freeing ------------------------------------------------------------ */
+
+static pmm_status_t check_block(uint64_t phys, unsigned order)
+{
+    if (!IS_PAGE_ALIGNED(phys))
+        return PMM_ERR_UNALIGNED;
+    uint64_t f = phys >> PAGE_SHIFT;
+    if (phys == 0 || f >= frame_count || !(pages[f].flags & PG_MANAGED))
+        return PMM_ERR_NOT_MANAGED;
+    if (!(pages[f].flags & PG_ALLOCATED))
+        return PMM_ERR_DOUBLE_FREE;
+    if (order > PMM_MAX_ORDER || !(pages[f].flags & PG_HEAD) || pages[f].order != order)
+        return PMM_ERR_BAD_ORDER;
+    return PMM_OK;
+}
+
+static void free_block_checked(uint32_t f, unsigned order)
+{
+    if (order == 0) {
+        pages[f].flags = PG_MANAGED;
+        pages[f].refcount = 0;
+        free_pages++;
+        if (hot_count == HOT_MAX)
+            drain_hot(HOT_MAX / 2);         /* full: send the older half on */
+        hot[hot_count++] = f;
+        return;
+    }
+    uint32_t n = 1u << order;
+    for (uint32_t i = 0; i < n; i++) {
+        pages[f + i].flags = PG_MANAGED;
+        pages[f + i].refcount = 0;
+    }
+    free_pages += n;
+    release_block(f, order);
+}
+
+pmm_status_t pmm_free_pages(uint64_t phys, unsigned order)
 {
     IRQ_GUARD();   /* preemption-safe: see cpu.h */
-    pmm_status_t st = PMM_OK;
-
-    if (!IS_PAGE_ALIGNED(phys))
-        st = PMM_ERR_UNALIGNED;
-    else if (!frame_is_managed(phys))
-        st = PMM_ERR_NOT_MANAGED;
-    else if (!bit_test(phys >> PAGE_SHIFT))
-        st = PMM_ERR_DOUBLE_FREE;
-
+    pmm_status_t st = check_block(phys, order);
     if (st != PMM_OK) {
-        kprintf("[pmm] rejected free of %p: %s\n", (void *)phys, pmm_status_str(st));
+        kprintf("[pmm] rejected free of %p (order %u): %s\n", (void *)phys, order,
+                pmm_status_str(st));
         return st;
     }
-
-    bit_clear(phys >> PAGE_SHIFT);
-    free_pages++;
+    free_block_checked((uint32_t)(phys >> PAGE_SHIFT), order);
     return PMM_OK;
+}
+
+pmm_status_t pmm_free_page(uint64_t phys)
+{
+    return pmm_free_pages(phys, 0);
+}
+
+/* ---- sharing ------------------------------------------------------------ */
+
+pmm_status_t pmm_page_ref(uint64_t phys)
+{
+    IRQ_GUARD();
+    pmm_status_t st = check_block(phys, 0);
+    if (st != PMM_OK)
+        return st;
+    struct pmm_page *p = &pages[phys >> PAGE_SHIFT];
+    if (p->refcount == 0xFFFF)
+        panic("pmm: page reference count overflow");
+    p->refcount++;
+    return PMM_OK;
+}
+
+bool pmm_page_unref(uint64_t phys)
+{
+    IRQ_GUARD();
+    if (check_block(phys, 0) != PMM_OK) {
+        kprintf("[pmm] rejected unref of %p: not an allocated page\n", (void *)phys);
+        return false;
+    }
+    uint32_t f = (uint32_t)(phys >> PAGE_SHIFT);
+    if (--pages[f].refcount > 0)
+        return false;
+    free_block_checked(f, 0);
+    return true;
+}
+
+unsigned pmm_page_refcount(uint64_t phys)
+{
+    IRQ_GUARD();
+    return check_block(phys, 0) == PMM_OK ? pages[phys >> PAGE_SHIFT].refcount : 0;
 }
 
 bool pmm_is_allocated(uint64_t phys)
 {
     IRQ_GUARD();   /* preemption-safe: see cpu.h */
-    return IS_PAGE_ALIGNED(phys) && frame_is_managed(phys) && bit_test(phys >> PAGE_SHIFT);
+    if (!IS_PAGE_ALIGNED(phys) || phys == 0 || (phys >> PAGE_SHIFT) >= frame_count)
+        return false;
+    uint8_t fl = pages[phys >> PAGE_SHIFT].flags;
+    return (fl & PG_MANAGED) && (fl & PG_ALLOCATED);
 }
+
+/* ---- statistics and checks ------------------------------------------------ */
 
 uint64_t pmm_free_page_count(void)
 {
@@ -217,6 +353,8 @@ void pmm_get_stats(struct pmm_stats *out)
     out->managed_pages = managed_pages;
     out->free_pages = free_pages;
     out->allocated_pages = managed_pages - free_pages;
+    for (unsigned o = 0; o <= PMM_MAX_ORDER; o++)
+        out->free_blocks[o] = free_blocks[o];
 }
 
 void pmm_print_stats(void)
@@ -233,6 +371,69 @@ void pmm_print_stats(void)
             s.allocated_pages, s.managed_pages);
     kprintf("[pmm] Non-RAM ranges        : %8lu KiB (firmware/MMIO, excluded)\n",
             s.non_ram_bytes / 1024);
+    kprintf("[pmm] Free blocks by order  :");
+    for (unsigned o = 0; o <= PMM_MAX_ORDER; o++)
+        kprintf(" %lu", s.free_blocks[o]);
+    kprintf("\n");
+}
+
+void pmm_drain_cache(void)
+{
+    IRQ_GUARD();
+    drain_hot(0);
+}
+
+bool pmm_check(void)
+{
+    IRQ_GUARD();
+    uint64_t counted = hot_count;
+    for (unsigned i = 0; i < hot_count; i++) {
+        const struct pmm_page *p = &pages[hot[i]];
+        if (p->flags != PG_MANAGED) {
+            kprintf("[pmm] check: cached page %u has flags 0x%x\n", hot[i], p->flags);
+            return false;
+        }
+    }
+    for (unsigned o = 0; o <= PMM_MAX_ORDER; o++) {
+        uint64_t n = 0;
+        uint32_t prev = NONE;
+        for (uint32_t f = free_head[o]; f != NONE; f = pages[f].next) {
+            const struct pmm_page *p = &pages[f];
+            if (f >= frame_count || !(p->flags & PG_FREE_HEAD) || p->order != o
+                || p->prev != prev || (f & ((1u << o) - 1)) != 0) {
+                kprintf("[pmm] check: bad free block %u at order %u\n", f, o);
+                return false;
+            }
+            for (uint32_t i = 0; i < (1u << o); i++) {
+                if (f + i >= frame_count || pages[f + i].flags & PG_ALLOCATED
+                    || !(pages[f + i].flags & PG_MANAGED)
+                    || (i > 0 && (pages[f + i].flags & PG_FREE_HEAD))) {
+                    kprintf("[pmm] check: free block %u (order %u) overlaps frame %u\n",
+                            f, o, f + i);
+                    return false;
+                }
+            }
+            uint32_t buddy = f ^ (1u << o);
+            if (o < PMM_MAX_ORDER && buddy < frame_count
+                && (pages[buddy].flags & PG_FREE_HEAD) && pages[buddy].order == o) {
+                kprintf("[pmm] check: free buddies %u and %u not merged\n", f, buddy);
+                return false;
+            }
+            counted += 1u << o;
+            prev = f;
+            n++;
+        }
+        if (n != free_blocks[o]) {
+            kprintf("[pmm] check: order %u list has %lu blocks, counter says %lu\n",
+                    o, n, free_blocks[o]);
+            return false;
+        }
+    }
+    if (counted != free_pages) {
+        kprintf("[pmm] check: free lists hold %lu pages, counter says %lu\n", counted, free_pages);
+        return false;
+    }
+    return true;
 }
 
 const char *pmm_status_str(pmm_status_t s)
@@ -242,6 +443,7 @@ const char *pmm_status_str(pmm_status_t s)
     case PMM_ERR_UNALIGNED:   return "address not page-aligned";
     case PMM_ERR_NOT_MANAGED: return "frame not managed by the PMM";
     case PMM_ERR_DOUBLE_FREE: return "double free";
+    case PMM_ERR_BAD_ORDER:   return "not the start of a block of that size";
     }
     return "unknown";
 }

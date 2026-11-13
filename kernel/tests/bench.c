@@ -15,6 +15,7 @@
 #include "cpu.h"
 #include "heap.h"
 #include "pmm.h"
+#include "slab.h"
 #include "kprintf.h"
 #include "proc.h"
 #include "sched.h"
@@ -111,6 +112,25 @@ static void bench_pmm(void)
     kprintf("[bench] pmm_page: %lu cycles/op\n", min);
 }
 
+/* ---- slab --------------------------------------------------------------- */
+
+/* Same object size as a thread record (176 bytes): slab cache versus the
+ * general heap. */
+static void bench_slab(void)
+{
+    struct slab_cache *c = slab_create("bench176", 176, 16, 0);
+    if (c == NULL)
+        return;
+    uint64_t min = ~0ULL;
+    for (int r = 0; r < ROUNDS; r++) {
+        uint64_t t0 = rdtsc();
+        for (int i = 0; i < HEAP_ITERS; i++)
+            slab_free(c, slab_alloc(c));
+        min = best(min, (rdtsc() - t0) / HEAP_ITERS);
+    }
+    kprintf("[bench] slab_176: %lu cycles/op\n", min);
+}
+
 /* ---- trace -------------------------------------------------------------- */
 
 #define TRACE_ITERS 20000
@@ -134,6 +154,8 @@ void bench_run(void)
     bench_heap("kmalloc_kfree_64", 64);
     bench_heap("kmalloc_kfree_4096", 4096);
     bench_pmm();
+    bench_heap("kmalloc_kfree_176", 176);
+    bench_slab();
     bench_trace();
     kprintf("[bench] done\n");
 }

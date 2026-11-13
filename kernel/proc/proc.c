@@ -7,6 +7,14 @@
 #include "panic.h"
 #include "string.h"
 #include "trace.h"
+#include "slab.h"
+#include "vm.h"
+
+/* Threads and processes come from their own slab caches (Phase 8):
+ * fixed-size objects, no heap search, no fragmentation. */
+static struct slab_cache *thread_cache, *process_cache;
+_Static_assert(sizeof(struct thread) <= SLAB_MAX_OBJECT, "struct thread too big for a slab");
+_Static_assert(sizeof(struct process) <= SLAB_MAX_OBJECT, "struct process too big for a slab");
 
 #define PROCESS_MAGIC 0x434F5250u   /* "PROC" */
 #define THREAD_MAGIC  0x44524854u   /* "THRD" */
@@ -172,6 +180,11 @@ static void table_remove(void **table, unsigned size, void *obj)
 
 void proc_init(void)
 {
+    thread_cache = slab_create("thread", sizeof(struct thread), 16, THREAD_MAX);
+    process_cache = slab_create("process", sizeof(struct process), 16, PROC_MAX);
+    if (thread_cache == NULL || process_cache == NULL)
+        panic("proc: cannot create the thread/process slab caches");
+
     kernel_proc.magic = PROCESS_MAGIC;
     kernel_proc.pid = 0;
     copy_name(kernel_proc.name, "kernel");
@@ -214,13 +227,13 @@ struct process *process_create(const char *name, uint32_t flags, proc_status_t *
     if (nproc == PROC_MAX)
         return fail(err, PROC_ERR_TABLE_FULL, "process_create");
 
-    struct process *p = kzalloc(sizeof(*p));
+    struct process *p = slab_zalloc(process_cache);
     if (p == NULL)
         return fail(err, PROC_ERR_NO_MEMORY, "process_create");
 
     if (flags & PROC_OWN_ADDRESS_SPACE) {
         if (vmm_create_address_space(&p->own_as) != VMM_OK) {
-            kfree(p);
+            slab_free(process_cache, p);
             return fail(err, PROC_ERR_NO_MEMORY, "process_create (address space)");
         }
         p->as = &p->own_as;
@@ -236,7 +249,7 @@ struct process *process_create(const char *name, uint32_t flags, proc_status_t *
         irq_restore(flags_irq);
         if (p->owns_as)
             vmm_destroy_address_space(&p->own_as);
-        kfree(p);
+        slab_free(process_cache, p);
         return fail(err, PROC_ERR_TABLE_FULL, "process_create");
     }
     p->magic = PROCESS_MAGIC;
@@ -275,12 +288,14 @@ proc_status_t process_terminate(struct process *p)
 
 static void process_destroy(struct process *p)
 {
-    if (p->owns_as)
+    if (p->owns_as) {
+        vm_space_release(&p->own_as);     /* regions and their memory */
         vmm_destroy_address_space(&p->own_as);
+    }
     table_remove((void **)proc_table, PROC_MAX, p);
     nproc--;
     p->magic = 0;
-    kfree(p);
+    slab_free(process_cache, p);
 }
 
 /* ---- threads ------------------------------------------------------------ */
@@ -322,13 +337,13 @@ struct thread *thread_create(struct process *p, const char *name,
     if (nthread == THREAD_MAX)
         return fail(err, PROC_ERR_TABLE_FULL, "thread_create");
 
-    struct thread *t = kzalloc(sizeof(*t));
+    struct thread *t = slab_zalloc(thread_cache);
     if (t == NULL)
         return fail(err, PROC_ERR_NO_MEMORY, "thread_create");
 
     kstack_status_t ks = kstack_alloc(&t->stack);
     if (ks != KSTACK_OK) {
-        kfree(t);
+        slab_free(thread_cache, t);
         return fail(err, ks == KSTACK_ERR_NO_SLOT ? PROC_ERR_NO_STACK : PROC_ERR_NO_MEMORY,
                     "thread_create (kernel stack)");
     }
@@ -352,7 +367,7 @@ struct thread *thread_create(struct process *p, const char *name,
     if (late != PROC_OK) {
         irq_restore(flags);
         kstack_free(&t->stack);
-        kfree(t);
+        slab_free(thread_cache, t);
         return fail(err, late, "thread_create");
     }
     t->tid = next_tid++;
@@ -419,7 +434,7 @@ proc_status_t thread_destroy(struct thread *t)
     table_remove((void **)thread_table, THREAD_MAX, t);
     nthread--;
     t->magic = 0;
-    kfree(t);
+    slab_free(thread_cache, t);
     irq_restore(flags);
     return PROC_OK;
 }
@@ -452,6 +467,20 @@ void thread_exit(int64_t code)
 
     thread_switch(next);
     panic("thread_exit: a TERMINATED thread was resumed");
+}
+
+void proc_trim_caches(void)
+{
+    slab_shrink(thread_cache);
+    slab_shrink(process_cache);
+}
+
+uint64_t proc_cache_pages(void)
+{
+    struct slab_stats t, p;
+    slab_get_stats(thread_cache, &t);
+    slab_get_stats(process_cache, &p);
+    return t.slabs + p.slabs;
 }
 
 unsigned proc_reap(void)
