@@ -87,12 +87,13 @@ def cmd_for(image: Path) -> List[str]:
 
 
 def boot_and_watch(image: Path, required: List[str], forbidden: List[str],
-                   timeout: int) -> tuple[bool, str]:
+                   timeout: int) -> tuple[bool, str, float]:
     """Boot `image` until every `required` marker is seen (success), a
-    `forbidden` marker appears, or `timeout` seconds pass."""
+    `forbidden` marker appears, or `timeout` seconds pass. Also returns the
+    seconds from starting QEMU to the end of the watch."""
     cmd = cmd_for(image)
     if not cmd:
-        return False, ""
+        return False, "", 0.0
     print(f"[TEST] {' '.join(cmd)}")
     # The kernel emits UTF-8 (box-drawing glyphs); don't let the platform
     # default codec (cp1252 on Windows) decode or re-encode it.
@@ -113,7 +114,8 @@ def boot_and_watch(image: Path, required: List[str], forbidden: List[str],
     threading.Thread(target=reader, daemon=True).start()
 
     lines: List[str] = []
-    deadline = time.time() + timeout
+    started = time.time()
+    deadline = started + timeout
     success = False
     failed = False
     try:
@@ -141,13 +143,16 @@ def boot_and_watch(image: Path, required: List[str], forbidden: List[str],
                 p.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 p.kill()
-    return success, "\n".join(lines)
+    return success, "\n".join(lines), time.time() - started
 
 
 def run_boot_test(image: Path, timeout: int = 120) -> int:
-    success, full = boot_and_watch(image, REQUIRED, FORBIDDEN, timeout)
+    success, full, seconds = boot_and_watch(image, REQUIRED, FORBIDDEN, timeout)
     print("=" * 60)
     if success:
+        from budgets import check_budgets
+        if not check_budgets(seconds):
+            return 1
         print("[PASS] BharatOS booted successfully.")
         print("[PASS] Phase 3 memory-management tests passed.")
         print("[PASS] Phase 4 process/thread tests passed.")
@@ -171,7 +176,7 @@ def run_fault_demo_test(image: Path, demo: str, timeout: int = 120) -> int:
                                         "[ok] Phase 6 debug and hardening verified."]
     forbidden = [m for m in ["KERNEL PANIC", "[FAIL]"]
                  if m not in FAULT_DEMO_ALLOW.get(demo, [])]
-    success, full = boot_and_watch(image, expect, forbidden, timeout)
+    success, full, _ = boot_and_watch(image, expect, forbidden, timeout)
     if success:
         print(f"[PASS] fault demo '{demo}' reported as expected.")
         return 0

@@ -1,0 +1,42 @@
+# One quick job: build, host unit tests, one BIOS boot test (which also
+# checks the size and boot-time budgets). Kept small on purpose; fault
+# demos, benchmarks and long runs stay local (see CLAUDE.md).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-boot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain (cached)
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: clang lld nasm qemu-system-x86
+          version: 1
+
+      - name: Cache Limine
+        uses: actions/cache@v4
+        with:
+          path: tools/limine
+          key: limine-${{ runner.os }}-${{ hashFiles('scripts/fetch_limine.py') }}
+
+      - name: Fetch Limine
+        run: python3 scripts/fetch_limine.py
+
+      - name: Unit tests
+        run: python3 build.py unit
+
+      - name: Build and boot test
+        timeout-minutes: 6
+        run: python3 build.py test

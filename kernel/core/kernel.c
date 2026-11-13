@@ -13,6 +13,7 @@
 #include "sched.h"
 #include "sched_test.h"
 #include "debug_test.h"
+#include "bench.h"
 #include "kprintf.h"
 #include "cpu.h"
 
@@ -227,6 +228,7 @@ void kernel_main(void)
     else
         serial_puts("[FAIL] Phase 6 debug tests reported failures.\n");
 
+    bench_run();          /* only does something in the bench build */
     run_fault_demo();
 
     /* Heartbeat: a dot per second. kmain sleeps in between, so the idle

@@ -144,13 +144,15 @@ FAULT_DEMOS = ["pf", "null", "stack", "de", "ud", "df", "ctx", "tstack",
                "panic", "smash", "uaf", "overflow"]
 
 
-def build_kernel(fault_demo: str | None = None) -> Path:
+def build_kernel(fault_demo: str | None = None, bench: bool = False) -> Path:
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     nasm = [TOOLS["nasm"], "-f", "elf64", "-F", "dwarf", "-g"]
     entry_o = object_for(ENTRY_ASM)
     run([*nasm, str(ENTRY_ASM), "-o", str(entry_o)])
     objs = [entry_o]
     defines = [f"-DBHARAT_FAULT_DEMO_{fault_demo.upper()}"] if fault_demo else []
+    if bench:
+        defines.append("-DBHARAT_BENCH")
     for src in C_SOURCES:
         obj = object_for(src)
         run([TOOLS["clang"], *CFLAGS, *defines, "-c", str(src), "-o", str(obj)])
@@ -281,6 +283,121 @@ def run_fault_tests() -> int:
     return 0
 
 
+# ---- benchmarks -----------------------------------------------------------
+
+BENCH_FILE = ROOT / "docs" / "benchmarks.md"
+BENCH_NAMES = ["context_switch", "kmalloc_kfree_64", "kmalloc_kfree_4096", "trace_event"]
+BENCH_HEADER = """# Benchmarks
+
+Recorded by `python build.py bench`, which boots a kernel built with
+`BHARAT_BENCH` and appends one row per run. Numbers are CPU time stamp
+counter (TSC) cycles per operation, best of 5 rounds, under QEMU without
+hardware acceleration (TCG). Use them to compare BharatOS with itself over
+time; they are not real-hardware numbers. Heap numbers include the heap
+poisoning and red-zone checks.
+
+- **context_switch**: one thread switch through `sched_yield`
+  (scheduler decision plus register save and restore).
+- **kmalloc_kfree_64 / _4096**: one allocation and free of that size.
+- **trace_event**: recording one event in the trace ring.
+- **boot_s**: seconds from starting QEMU to the bench results (includes
+  all boot self-tests).
+
+| Date | Commit | Host | context_switch | kmalloc_kfree_64 | kmalloc_kfree_4096 | trace_event | boot_s |
+|---|---|---|---|---|---|---|---|
+"""
+
+
+def run_bench() -> int:
+    import datetime
+    import platform
+    import re
+    from test_boot import boot_and_watch, FORBIDDEN
+    image = build_image(build_kernel(bench=True))
+    success, out, seconds = boot_and_watch(image, ["[bench] done"], FORBIDDEN, 300)
+    build_image(build_kernel())   # leave a normal image behind
+    results = dict(re.findall(r"\[bench\] (\w+): (\d+) cycles/op", out))
+    missing = [n for n in BENCH_NAMES if n not in results]
+    if not success or missing:
+        print(f"[FAIL] benchmark run incomplete; missing: {', '.join(missing) or 'done marker'}")
+        return 1
+    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
+                            capture_output=True, text=True).stdout.strip() or "?"
+    row = (f"| {datetime.date.today().isoformat()} | {commit} | {platform.system()} | "
+           + " | ".join(results[n] for n in BENCH_NAMES) + f" | {seconds:.1f} |\n")
+    text = BENCH_FILE.read_text(encoding="utf-8") if BENCH_FILE.exists() else BENCH_HEADER
+    BENCH_FILE.write_text(text + row, encoding="utf-8", newline="\n")
+    print("=" * 60)
+    for n in BENCH_NAMES:
+        print(f"[bench] {n:20s} {results[n]:>8} cycles/op")
+    print(f"[PASS] results added to {BENCH_FILE.relative_to(ROOT).as_posix()}")
+    return 0
+
+
+# ---- host unit tests -------------------------------------------------------
+
+UNIT_DIR = ROOT / "tests" / "unit"
+UNIT_BUILD = BUILD_DIR / "unit"
+
+# Each program: the kernel files under test (the shared support files are
+# added to every program).
+UNIT_PROGRAMS = {
+    "heap": [KERNEL_DIR / "mm" / "heap.c", KERNEL_DIR / "trace" / "trace.c"],
+    "sched": [KERNEL_DIR / "sched" / "sched.c", KERNEL_DIR / "trace" / "trace.c"],
+}
+UNIT_COMMON = [UNIT_DIR / "fakes.c", KERNEL_DIR / "lib" / "kprintf.c",
+               KERNEL_DIR / "lib" / "string.c"]
+
+
+def run_unit_tests() -> int:
+    """Build kernel code as small freestanding programs for this machine
+    and run them. No C library is used, so the same clang + lld that build
+    the kernel are enough on Windows and Linux (see tests/unit/unit.h)."""
+    clang = resolve_tool("BHARAT_CLANG", ["clang", "clang-18", "clang-17"])
+    UNIT_BUILD.mkdir(parents=True, exist_ok=True)
+    cflags = ["-ffreestanding", "-nostdlibinc", "-fno-stack-protector",
+              "-O2", "-g", "-std=gnu11", "-Wall", "-Wextra",
+              "-iquote", str(UNIT_DIR / "fakes"), "-iquote", str(UNIT_DIR),
+              "-include", str(UNIT_DIR / "fakes" / "unit_config.h"),
+              *[f"-I{d}" for d in INCLUDE_DIRS]]
+    if IS_WIN:
+        dlltool = resolve_tool("BHARAT_DLLTOOL", [
+            str(Path(clang).parent / "llvm-dlltool.exe"), "llvm-dlltool"])
+        implib = UNIT_BUILD / "kernel32.lib"
+        run([dlltool, "-m", "i386:x86-64", "-d", str(UNIT_DIR / "kernel32.def"),
+             "-l", str(implib)])
+        # Windows `long` is 32-bit, so the kernel's %lu with uint64_t warns
+        # here; kprintf reads 64 bits for %l, so the output is still right.
+        cflags = ["-target", "x86_64-pc-windows-msvc", "-mno-stack-arg-probe",
+                  *cflags, "-Wno-format"]
+        host = UNIT_DIR / "host_windows.c"
+        ldflags = ["-fuse-ld=lld", "-nostdlib", "-Wl,/entry:unit_start",
+                   "-Wl,/subsystem:console", "-Wl,/nodefaultlib", str(implib)]
+        exe = ".exe"
+    elif sys.platform.startswith("linux"):
+        cflags = ["-target", "x86_64-unknown-linux-gnu", "-fno-pie", *cflags]
+        host = UNIT_DIR / "host_linux.c"
+        ldflags = ["-fuse-ld=lld", "-nostdlib", "-static", "-no-pie"]
+        exe = ""
+    else:
+        raise BuildError(f"unit tests support Windows and Linux hosts, not {sys.platform}")
+
+    failures = []
+    for name, sources in UNIT_PROGRAMS.items():
+        out = UNIT_BUILD / f"{name}_unit{exe}"
+        srcs = [UNIT_DIR / f"{name}_unit.c", *sources, *UNIT_COMMON, host]
+        run([clang, *cflags, *[str(s) for s in srcs], *ldflags, "-o", str(out)])
+        print(f"[unit] running {out.name}", flush=True)
+        if subprocess.run([str(out)]).returncode != 0:
+            failures.append(name)
+    print("=" * 60)
+    if failures:
+        print(f"[FAIL] unit tests failed: {', '.join(failures)}")
+        return 1
+    print(f"[PASS] all {len(UNIT_PROGRAMS)} unit test programs passed.")
+    return 0
+
+
 def clean() -> None:
     if BUILD_DIR.exists():
         shutil.rmtree(BUILD_DIR)
@@ -292,7 +409,7 @@ def main() -> int:
                                  description="BharatOS build system")
     ap.add_argument("command",
                     choices=["build", "image", "run", "run-uefi", "debug", "test",
-                             "test-faults", "clean", "help"],
+                             "test-faults", "unit", "bench", "clean", "help"],
                     nargs="?", default="build")
     ap.add_argument("--fault-demo", choices=FAULT_DEMOS,
                     help="build a kernel that deliberately triggers this fatal "
@@ -307,9 +424,13 @@ def main() -> int:
         return 0
 
     try:
+        if args.command == "unit":      # needs only clang and lld
+            return run_unit_tests()
         configure()
         if args.command == "test-faults":
             return run_fault_tests()
+        if args.command == "bench":
+            return run_bench()
         if args.command in ("build", "image", "run", "run-uefi", "debug", "test"):
             kernel = build_kernel(fault_demo=args.fault_demo)
             image = build_image(kernel)
