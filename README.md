@@ -170,12 +170,17 @@ All suites pass under BIOS and UEFI with zero compiler warnings.
 - [x] **7:** modern hardware: ACPI, APIC, PCI, tickless timer, screen console
 - [x] **8:** memory that scales: buddy, slab, demand paging, copy-on-write
 - [x] **9:** multi-core: per-CPU queues, spinlocks with lock-order checking, TLB shootdown, RCU
-- [ ] **10–11:** user mode with handles and async rings; microkernel IPC and services
-- [ ] **12:** shell, self-check and explain (`why`)
-- [ ] **13–14:** drivers as services; BharatFS with undo, safe from power cuts
-- [ ] **15–16:** permissions and verified boot; networking
-- [ ] **17–18:** resume, replay and live migration; desktop and WebAssembly apps
-- [ ] **19–20:** made for Bharat (Hindi/Marathi, 128 MB, real hardware); extras
+- [ ] **10:** V1 core: keyboard and mouse, files in RAM, login with your name, terminal
+- [ ] **11:** V1 desktop and demo: windows, taskbar, Terminal, Files, System Monitor, Health
+- [ ] **12:** V1 hardening: thorough tests, fuzzing, screenshots, real hardware
+- [ ] **13–14:** user mode with handles and async rings; microkernel IPC and services
+- [ ] **15:** self-check and explain (`why`)
+- [ ] **16–17:** drivers as services; BharatFS with undo, safe from power cuts
+- [ ] **18–19:** permissions and verified boot; networking
+- [ ] **20–21:** resume, replay and live migration; desktop polish and WebAssembly apps
+- [ ] **22–23:** made for Bharat (Hindi/Marathi, 128 MB, real hardware); extras
+
+What's next and why: [WAY_AHEAD.md](WAY_AHEAD.md).
 
 The current plan and its reasons: [docs/UPDATES.md](docs/UPDATES.md).
 

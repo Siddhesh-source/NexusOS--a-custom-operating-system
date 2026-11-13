@@ -9,6 +9,23 @@ and LLD where they disagree.
 
 ---
 
+## Next phase prompt (V1)
+
+Paste this in a fresh session to build the next V1 phase:
+
+```text
+Read CLAUDE.md, WAY_AHEAD.md and docs/UPDATES.md §7, then build the next
+unfinished V1 phase (Phase 10, then 11, then 12) completely. Follow the
+CLAUDE.md git workflow: new branch from main, small steps, run
+`python build.py test` after each step (and `--smp 1`), test-faults and
+unit when the rules say so, commit in batches, then phase doc, UPDATES
+status, README, bug journal and decisions, PR and merge. Keep it simple
+and quick: V1 apps are kernel threads behind small APIs, files are in
+RAM. Every feature gets headless boot self-tests. Do not stop to ask
+unless a decision really needs me; report what you built, test results
+and anything left for Phase 12.
+```
+
 ## Master prompt: implement one step of a phase
 
 ```text

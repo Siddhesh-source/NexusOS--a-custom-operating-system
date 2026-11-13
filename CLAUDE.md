@@ -188,6 +188,16 @@ compiled; every folder with a `.h` is on the include path. So:
   block saying what the module does and its limits.
 - Zero compiler warnings (`-Wall -Wextra`).
 
+## V1 rules (Phases 10–12)
+
+- V1 (a demo-ready OS) comes first: see `WAY_AHEAD.md` and UPDATES §7.
+- V1 apps (login, shell, file manager, monitor, desktop) run as kernel
+  threads behind small APIs (`input_*`, `fs_*`, `ui_*`). Keep the APIs
+  narrow so moving them to user mode (Phase 13+) is mechanical.
+- Files live in RAM (ramfs) seeded from a boot bundle; no disk driver yet.
+- Quick and simple, but every feature still gets headless boot self-tests.
+  The "Safety rules" below apply once user mode exists (Phase 13).
+
 ## Safety rules for the next phases
 
 - The kernel touches user memory **only** through `copy_from_user`,

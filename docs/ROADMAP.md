@@ -1,5 +1,12 @@
 # BharatOS Roadmap: Phases 6–12
 
+> **Superseded for ordering.** The current order is in `docs/UPDATES.md`
+> §7: V1 first (Phases 10–12: input, files, login, terminal, desktop,
+> demo, hardening), then the rest (Phases 13–23). The step-by-step
+> details below still apply: the shell parts of Phase 7 and the desktop of
+> Phase 11 here are what V1 builds first, in simpler form. See
+> `WAY_AHEAD.md` for the short version.
+
 This is the build plan from where the code is today (Phase 5 done) to a
 finished, demo-ready OS with a desktop. Read
 [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) first for the *why*, and
