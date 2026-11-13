@@ -281,6 +281,21 @@ qemu-system-x86_64 -accel tcg,thread=multi -smp 4 -m 512M \
   -drive file=build/bharat.img,format=raw,if=ide -nographic
 ```
 
+## Bugs found and lessons
+
+Each is written up in `docs/BUG_JOURNAL.md`:
+- **15:** one CPU never got work (idle CPUs were always woken in the same
+  order), and the old fairness check flaked on 4 CPUs because the host
+  delivers some alarms late. Those flaky boots first looked like crashes;
+  the harness had just stopped two seconds after a `[FAIL]` line. Lesson:
+  read the whole log before blaming the hardware.
+- **16:** RCU grace periods took a third of a second because the test's
+  readers almost never had interrupts on. Lesson: keep interrupts-off
+  sections short; they delay every grace period and shootdown.
+- **17:** spinlocks made a switch nearly 4x slower until global locks
+  left the switch path. Lesson: nothing shared by all CPUs belongs on the
+  switch path.
+
 ## Known limits
 
 - At most 16 CPUs; CPUs cannot be taken offline.

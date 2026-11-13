@@ -200,3 +200,41 @@ New entries go at the end. Entries 1–7 come from Phases 2–5 (see
   kernel's share). A thread getting far more time still fails.
 - **Guarding test:** "the work spread over every CPU" in `smp_test.c`;
   the fairness check in `sched_test.c` on `--smp 4`.
+
+### 16. RCU grace periods took a third of a second each (Phase 9)
+- **Symptom:** the RCU self-test (300 updates, each waiting for a grace
+  period) took 92 seconds; the whole boot took 110 s instead of 15.
+- **How found:** timestamping each test section of a boot from the host.
+- **Root cause:** the test's reader threads spent almost all their time
+  inside a read section (interrupts off) and turned interrupts on for
+  only a few instructions between reads. A grace period needs every
+  reader CPU to take an IPI, and QEMU only checks for interrupts between
+  blocks of instructions, so that tiny window was usually missed.
+- **Fix:** the readers do a little work outside the read section, as
+  real readers do. Lesson: a CPU that keeps interrupts off nearly all the
+  time delays every grace period and every TLB shootdown; keep read
+  sections and spinlock sections short.
+- **Guarding test:** the RCU test in `smp_test.c` (and the boot-time
+  budget, which caught the slowdown).
+
+### 17. Spinlocks made a thread switch nearly 4x slower (Phase 9)
+- **Symptom:** after IRQ_GUARD became spinlocks, the bench showed
+  `context_switch` at 8,590 cycles (was 2,259) and `trace_event` at
+  1,708 (was 211), even on one CPU. With 4 CPUs switching at once, each
+  switch cost 2.3x the one-CPU number.
+- **How found:** `python build.py bench`, then the same bench kernel on
+  1 and 4 CPUs to separate kernel cost from QEMU's mode.
+- **Root cause:** every lock re-read the interrupt flag (a slow `pushfq`
+  under QEMU) right after turning interrupts off, and called a function
+  to ask "is this CPU panicking?". Worse, every switch took two locks
+  shared by all CPUs: the trace ring's (each switch records an event) and
+  the process table's (to update the kernel process's summary state,
+  which never changes), so CPUs queued behind each other.
+- **Fix:** skip the redundant flag check in `spin_lock_irqsave`; make the
+  panic test one inline load; a lock-free trace ring (atomic slot claim,
+  sequence number written last); no summary update for the kernel
+  process. Now 2,362 and 229 cycles on one CPU; 1.3-1.9x when all CPUs
+  switch at once. Lesson: nothing shared by all CPUs belongs on the
+  switch path.
+- **Guarding test:** the `context_switch`, `trace_event` and
+  `context_switch_par` columns of `docs/benchmarks.md`.
