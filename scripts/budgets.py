@@ -22,8 +22,10 @@ LIMITS = {
     # Raised from 8,000 when Phases 7-8 (ACPI, PCI, APIC, tickless clock,
     # buddy, slab, demand paging, copy-on-write) took it to about 7,700,
     # then from 10,000 for V1 (input, files, login, shell, desktop:
-    # Phases 10-11), as planned in docs/UPDATES.md §7.
-    "kernel_lines": 16000,
+    # Phases 10-11), as planned in docs/UPDATES.md §7, then to 17,000
+    # when the finished desktop (graphics, windows, six apps, the tour)
+    # landed at about 16,100 (decision D34).
+    "kernel_lines": 17000,
     "boot_seconds": 90,      # about 15 s locally; CI machines are slower
 }
 

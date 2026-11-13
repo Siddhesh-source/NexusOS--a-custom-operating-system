@@ -16,5 +16,7 @@ int strncmp(const char *a, const char *b, size_t n);
  * strlen(src), so a result >= size means it was cut short. */
 size_t strlcpy(char *dst, const char *src, size_t size);
 char *strchr(const char *s, int c);
+char *strrchr(const char *s, int c);           /* last c, or NULL */
+char *strstr(const char *hay, const char *needle);
 
 #endif /* BHARAT_STRING_H */

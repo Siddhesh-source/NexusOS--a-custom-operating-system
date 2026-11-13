@@ -148,7 +148,8 @@ DEFAULT_SMP = 4
 SMP = DEFAULT_SMP
 
 
-def build_kernel(fault_demo: str | None = None, bench: bool = False) -> Path:
+def build_kernel(fault_demo: str | None = None, bench: bool = False,
+                 demo_auto: bool = False) -> Path:
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     nasm = [TOOLS["nasm"], "-f", "elf64", "-F", "dwarf", "-g"]
     entry_o = object_for(ENTRY_ASM)
@@ -157,6 +158,8 @@ def build_kernel(fault_demo: str | None = None, bench: bool = False) -> Path:
     defines = [f"-DBHARAT_FAULT_DEMO_{fault_demo.upper()}"] if fault_demo else []
     if bench:
         defines.append("-DBHARAT_BENCH")
+    if demo_auto:
+        defines.append("-DBHARAT_DEMO_AUTO")    # log in and run the tour by itself
     for src in C_SOURCES:
         obj = object_for(src)
         run([TOOLS["clang"], *CFLAGS, *defines, "-c", str(src), "-o", str(obj)])
@@ -235,8 +238,9 @@ def run_qemu(image: Path, *, uefi: bool = False, window: bool = False) -> int:
         # A window with the screen (keys typed there arrive as a PS/2
         # keyboard), and the serial console still in this terminal.
         cmd += ["-serial", "mon:stdio"]
-        print("[qemu] Type in the QEMU window or here. Quit: close the window, "
-              "or Ctrl+A then X here.")
+        print("[qemu] The desktop is in the QEMU window: type your name there. Click in the "
+              "window to use the mouse (Ctrl+Alt+G lets it go). F12 there starts a tour.")
+        print("[qemu] The text console is here. Quit: close the window, or Ctrl+A then X here.")
     elif not uefi:
         cmd += ["-nographic"]
     else:
@@ -435,7 +439,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="build.py",
                                  description="BharatOS build system")
     ap.add_argument("command",
-                    choices=["build", "image", "run", "run-uefi", "debug", "test",
+                    choices=["build", "image", "run", "run-uefi", "demo", "debug", "test",
                              "test-faults", "unit", "bench", "clean", "help"],
                     nargs="?", default="build")
     ap.add_argument("--fault-demo", choices=FAULT_DEMOS,
@@ -443,6 +447,8 @@ def main() -> int:
                          "exception after the memory tests")
     ap.add_argument("--window", action="store_true",
                     help="run: also open a QEMU window showing the screen")
+    ap.add_argument("--auto", action="store_true",
+                    help="demo: log in as 'demo' and run the desktop tour by itself")
     ap.add_argument("--smp", type=int, default=DEFAULT_SMP, metavar="N",
                     help=f"number of CPUs for QEMU (1-16, default {DEFAULT_SMP})")
     args = ap.parse_args()
@@ -471,6 +477,9 @@ def main() -> int:
         if args.command in ("build", "image", "run", "run-uefi", "debug", "test"):
             kernel = build_kernel(fault_demo=args.fault_demo)
             image = build_image(kernel)
+        if args.command == "demo":
+            image = build_image(build_kernel(demo_auto=args.auto))
+            return run_qemu(image, uefi=False, window=True)
         if args.command == "run":
             return run_qemu(image, uefi=False, window=args.window)
         if args.command == "run-uefi":

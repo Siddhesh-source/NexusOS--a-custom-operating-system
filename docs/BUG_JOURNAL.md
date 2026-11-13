@@ -286,3 +286,22 @@ New entries go at the end. Entries 1–7 come from Phases 2–5 (see
   an idle CPU always finds something to steal. `checks` live waits are
   longer, and its test prints the command's output if it fails.
 - **Guarding test:** the same check, now on 1, 2 and 4 CPUs every boot.
+
+### 21. Two logins at once could read each other's user list (Phase 11)
+- **Symptom:** none seen yet; it would show as a wrong "That password is
+  not right." (or a wrong welcome) when someone logs in on the desktop
+  at the same moment as on the text console.
+- **How found:** reading `login_check` while wiring it into the
+  graphical login. Its comment said "only the console thread logs in".
+- **Root cause:** `login_check` read `/etc/users` into one `static`
+  2 KiB buffer and cut it into lines in place. With a second caller (the
+  desktop thread), both threads could write and split the same buffer at
+  once, so one could compare a password against the other's half-cut
+  text.
+- **Fix:** each call reads the list into its own heap buffer and frees
+  it; the result is worked out in one place, so every path frees it.
+- **Guarding test:** the shell tests check the login rules on the
+  console path; the desktop tests check them on the graphical path
+  (bad name, password asked for and refused, a good name). The boot test
+  logs in on both. A test that forces both at the same instant is left
+  for the Phase 12 fuzzing.

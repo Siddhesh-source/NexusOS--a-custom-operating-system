@@ -1,3 +1,4 @@
+#include "fbcon.h"
 #include "panic.h"
 #include "serial.h"
 #include "backtrace.h"
@@ -23,6 +24,7 @@ bool panic_begin(void)
                                      __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
         return expect == (int)cpu_id();   /* a panic inside the panic: carry on */
     smp_halt_others();
+    fbcon_resume();            /* the desktop may own the screen */
     return true;
 }
 

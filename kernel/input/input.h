@@ -21,9 +21,13 @@
  * Mouse events carry the movement and the new position, kept inside the
  * screen, and the buttons held.
  *
- * Limits: one queue for the whole system (V1 has one app reading at a
- * time); INPUT_QUEUE_SIZE events, newer ones are dropped and counted when
- * it is full; US keyboard layout only. */
+ * Two readers: once the desktop starts (input_set_desktop), the PS/2
+ * keyboard and mouse feed the desktop's own queue (input_desktop_poll),
+ * while keys typed over serial keep going to the text console. So a
+ * terminal session and the desktop work side by side.
+ *
+ * Limits: one reader per queue; INPUT_QUEUE_SIZE events per queue, newer
+ * ones are dropped and counted when it is full; US keyboard layout only. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -106,7 +110,12 @@ void input_wait(struct input_event *out);
 /* Same, but keys only (mouse events are skipped). Returns the key. */
 uint16_t input_wait_key(void);
 
-/* Throw away every queued event. */
+/* From now on (on = true), PS/2 keyboard and mouse events go to the
+ * desktop's queue, read with input_desktop_poll (never waits). */
+void input_set_desktop(bool on);
+bool input_desktop_poll(struct input_event *out);
+
+/* Throw away every queued event (the console's queue). */
 void input_flush(void);
 
 void input_get_stats(struct input_stats *out);

@@ -33,8 +33,9 @@ python scripts/fetch_limine.py      # once: download the bootloader into tools/
 python build.py                     # build kernel + disk image (build/bharat.img)
 python build.py run                 # boot in QEMU (BIOS), serial in terminal; quit: Ctrl+A then X
 python build.py run --window        # same, plus a QEMU window showing the screen (PS/2 keyboard/mouse)
+python build.py demo                # the desktop in a QEMU window (+ serial console); --auto runs the tour by itself
 python build.py run-uefi            # boot through UEFI firmware
-python build.py test                # build + boot + self-tests + budgets + a typed login session (exit 0 = pass); --smp N (default 4)
+python build.py test                # build + boot + self-tests + budgets + typed logins, quick desktop tour, screenshot (exit 0 = pass); --smp N (default 4)
 python build.py test-faults         # build 13 crash-on-purpose kernels, check each report
 python build.py unit                # host unit tests: heap, scheduler, buddy, slab (millions of cases)
 python build.py bench               # benchmarks -> appends a row to docs/benchmarks.md
@@ -68,10 +69,11 @@ kernel/
   proc/                  processes, threads, kernel stacks
   sched/                 scheduler (per-CPU run queues, work stealing), wait queues
   smp/                   CPU start-up, per-CPU data, spinlocks + lock-order checker, IPIs, RCU
-  drivers/               device drivers (serial, screen console)
+  drivers/               device drivers (serial, screen console, real-time clock)
   input/                 input event queue; keyboard, mouse and serial decoders; PS/2 + serial IRQs
   fs/                    files in memory (ramfs) and the boot-bundle (tar) loader
-  apps/                  V1 apps as kernel threads: console (login), shell, line editor
+  apps/                  V1 apps: console (login), shell, line editor; desktop apps (*_app.c)
+  ui/                    graphics (gfx), boot splash, window manager (wm), text buffer, desktop, tour
   lib/                   kprintf, string, box drawing
   trace/                 call traces (backtrace.c + generated symbol table), event trace ring
   include/               third-party headers (limine.h)
