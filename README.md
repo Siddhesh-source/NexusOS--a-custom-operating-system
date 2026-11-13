@@ -8,8 +8,8 @@ itself, and is made for the people who use it.**
 ![Architecture](https://img.shields.io/badge/arch-x86--64-blue)
 ![Language](https://img.shields.io/badge/language-C%20%7C%20NASM-informational)
 ![Boot](https://img.shields.io/badge/boot-Limine%20(BIOS%20%2B%20UEFI)-orange)
-![Tests](https://img.shields.io/badge/boot%20tests-382%20passing-brightgreen)
-![Status](https://img.shields.io/badge/progress-Phase%209%20of%2020-yellow)
+![Tests](https://img.shields.io/badge/boot%20tests-516%20passing-brightgreen)
+![Status](https://img.shields.io/badge/progress-Phase%2010%20of%2023-yellow)
 
 </div>
 
@@ -24,7 +24,7 @@ simple, solid engineering.
 
 | | What it means for you | Status |
 |---|---|---|
-| ✅ **Checks itself on every boot** | 382 health checks run inside the kernel each time it starts; problems are reported, never hidden | working today |
+| ✅ **Checks itself on every boot** | 516 health checks run inside the kernel each time it starts; problems are reported, never hidden | working today |
 | 💬 **Explains itself** | `why slow`, `why crash`: plain sentences from real system data, offline | Phase 12 |
 | ↩️ **Undo for your files** | saves never overwrite data, so power cuts can't corrupt files and every change can be undone | Phase 14 |
 | 🔒 **Apps ask first** | apps start with no access; you allow or deny; every use is logged | Phase 15 |
@@ -50,6 +50,15 @@ More detail: [Project overview](docs/PROJECT_OVERVIEW.md).
 [ok] Phase 7 modern hardware verified.
 [ok] Phase 8 memory that scales verified.
 [ok] Phase 9 multi-core verified.
+[ok] Phase 10 input verified.
+[ok] Phase 10 files in memory verified.
+[ok] Phase 10 login and shell verified.
+
+BharatOS login: asha
+Hello, asha! Type 'help' to see what you can do.
+asha@bharat:~$ echo hi > a.txt
+asha@bharat:~$ cat a.txt
+hi
 ```
 
 | Area | What's implemented |
@@ -61,7 +70,10 @@ More detail: [Project overview](docs/PROJECT_OVERVIEW.md).
 | **Multi-core** | all CPUs started, per-CPU data and run queues, work stealing, named spinlocks with a lock-order checker, TLB shootdown, RCU lookups |
 | **Threads** | processes and kernel threads, own guarded stack per thread, assembly context switch |
 | **Scheduler** | preemptive time-sharing (20 ms slices), tickless (an idle CPU gets no timer interrupts), idle thread, sleep, live statistics |
-| **Safety** | guard pages, stack canaries, compiler stack protector, heap poisoning and red zones (use-after-free and overflow caught), corrupted-state detection, interrupt-safe allocators |
+| **Safety** | crashes of a demo thread are reported and contained (the system keeps running), guard pages, stack canaries, compiler stack protector, heap poisoning and red zones (use-after-free and overflow caught), corrupted-state detection, interrupt-safe allocators |
+| **Input** | PS/2 keyboard and mouse, plus typing in a terminal (serial), all as one event queue; threads sleep until a key arrives |
+| **Files** | files and folders in memory, filled at boot from a bundle on the disk; size limits checked |
+| **Terminal** | login with your name, a shell with 24 commands (`ls cat echo > cd mkdir rm cpus top ps kill checks lockdemo crashdemo` ...), history with the arrow keys |
 | **Debugging** | crash reports with named call traces and the last 16 kernel events, GDB/LLDB attach mode, host unit tests, benchmarks, size and boot-time budgets, CI |
 
 Full boot log: [docs/logs/boot-output.md](docs/logs/boot-output.md)
@@ -82,7 +94,8 @@ Quit QEMU with **Ctrl+A**, then **X**.
 | Command | What it does |
 |---|---|
 | `python build.py` | Build the kernel and bootable disk image |
-| `python build.py run` | Boot in QEMU (BIOS), output in the terminal |
+| `python build.py run` | Boot in QEMU (BIOS) in the terminal; log in and type commands there |
+| `python build.py run --window` | Same, plus a QEMU window showing the screen (type in either) |
 | `python build.py run-uefi` | Boot through UEFI firmware (OVMF) |
 | `python build.py test` | Boot and verify every self-test and the budgets (exit code 0 = pass); `--smp N` sets the CPU count (default 4) |
 | `python build.py test-faults` | Verify all 13 crash-on-purpose demos are caught and reported |
@@ -144,7 +157,7 @@ Design details: [high-level design](docs/design/HLD.md) ·
 
 ## Testing
 
-Every boot runs **352 checks** inside the kernel, then a live multitasking demo:
+Every boot runs **516 checks** inside the kernel, then logs in and types commands at the real prompt:
 
 | Suite | Checks | Highlights |
 |---|---|---|
@@ -154,6 +167,10 @@ Every boot runs **352 checks** inside the kernel, then a live multitasking demo:
 | Debug & hardening | 29 | symbol lookup, call-trace walk, random canary, use-after-free and overflow detection, event trace |
 | Hardware | 38 | ACPI tables, PCI list, screen text, PIC masked, sleep accuracy, tickless idle, I/O APIC routing |
 | Memory that scales | 62 | buddy split/merge, slab limits and poisoning, demand paging, copy-on-write, shared objects |
+| Multi-core | 29 | lost-update stress on all CPUs, lock-order inversion caught, TLB shootdown, RCU, work stealing |
+| Input | 32 | key, terminal and mouse decoding, full queue, keys through the real IRQ 1 / IRQ 12 path, sleeping readers |
+| Files | 46 | paths, create/read/write/list/delete, bad paths, every size limit, the boot bundle |
+| Login and shell | 58 | line editor, login rules, scripted commands with checked output, contained crashes |
 
 Outside the kernel, `python build.py unit` runs about **2.8 million** checks
 on the real heap and scheduler code (random operations against a model),
@@ -170,7 +187,7 @@ All suites pass under BIOS and UEFI with zero compiler warnings.
 - [x] **7:** modern hardware: ACPI, APIC, PCI, tickless timer, screen console
 - [x] **8:** memory that scales: buddy, slab, demand paging, copy-on-write
 - [x] **9:** multi-core: per-CPU queues, spinlocks with lock-order checking, TLB shootdown, RCU
-- [ ] **10:** V1 core: keyboard and mouse, files in RAM, login with your name, terminal
+- [x] **10:** V1 core: keyboard and mouse, files in RAM, login with your name, terminal
 - [ ] **11:** V1 desktop and demo: windows, taskbar, Terminal, Files, System Monitor, Health
 - [ ] **12:** V1 hardening: thorough tests, fuzzing, screenshots, real hardware
 - [ ] **13–14:** user mode with handles and async rings; microkernel IPC and services
@@ -192,19 +209,22 @@ Step-by-step plan with tests for each phase: [docs/ROADMAP.md](docs/ROADMAP.md)
 ├── build.py              build, run and test entry point
 ├── CLAUDE.md             guide for contributors and AI agents
 ├── PROMPT.md             ready-made prompts for AI-assisted development
-├── boot/                 Limine configuration
+├── boot/                 Limine configuration; bundle/ = files loaded at boot
 ├── .github/workflows/     CI: build, unit tests, one boot test
 ├── scripts/              disk image writer, QEMU test harness, symbol table, budgets, GDB script
 ├── kernel/
 │   ├── arch/x86_64/      entry, linker script, GDT/TSS, IDT, interrupts, APIC, clock, context switch
 │   ├── acpi/             ACPI tables (MADT, HPET, MCFG)
 │   ├── pci/              PCI device scan
-│   ├── core/             kernel_main, panic
+│   ├── core/             kernel_main, panic, contained crashes
 │   ├── mm/               buddy allocator, slab caches, page tables, heap, memory objects, page faults
 │   ├── proc/             processes, threads, kernel stacks
-│   ├── sched/            scheduler (per-CPU run queues)
+│   ├── sched/            scheduler (per-CPU run queues), wait queues
 │   ├── smp/              CPU start-up, per-CPU data, spinlocks, IPIs, RCU
-│   ├── drivers/          serial, screen console (keyboard, disk, mouse to come)
+│   ├── drivers/          serial, screen console
+│   ├── input/            keyboard, mouse and serial input, event queue
+│   ├── fs/               files in memory (ramfs) and the boot bundle
+│   ├── apps/             V1 apps as kernel threads: login console, shell
 │   ├── lib/              kprintf, string, box drawing
 │   ├── trace/            call traces (symbol table) and the event trace
 │   ├── include/          limine.h
@@ -228,7 +248,7 @@ Step-by-step plan with tests for each phase: [docs/ROADMAP.md](docs/ROADMAP.md)
 | [High-level design](docs/design/HLD.md) | layers, components, main flows, key decisions |
 | [Low-level design](docs/design/LLD.md) | structs, constants, system calls, disk format |
 | [Desktop design](docs/design/UI.md) | layout, colours, screens |
-| Phase docs: [2](docs/phases/phase-2-interrupts.md) · [3](docs/phases/phase-3-memory.md) · [4](docs/phases/phase-4-processes.md) · [5](docs/phases/phase-5-scheduler.md) · [6](docs/phases/phase-6-debug-hardening.md) · [7](docs/phases/phase-7-modern-hardware.md) · [8](docs/phases/phase-8-memory-that-scales.md) · [9](docs/phases/phase-9-multi-core.md) | how each finished layer works |
+| Phase docs: [2](docs/phases/phase-2-interrupts.md) · [3](docs/phases/phase-3-memory.md) · [4](docs/phases/phase-4-processes.md) · [5](docs/phases/phase-5-scheduler.md) · [6](docs/phases/phase-6-debug-hardening.md) · [7](docs/phases/phase-7-modern-hardware.md) · [8](docs/phases/phase-8-memory-that-scales.md) · [9](docs/phases/phase-9-multi-core.md) · [10](docs/phases/phase-10-v1-core.md) | how each finished layer works |
 | [Benchmarks](docs/benchmarks.md) · [Bug journal](docs/BUG_JOURNAL.md) | measured costs over time; hard bugs and how they were found |
 
 ## Tech stack

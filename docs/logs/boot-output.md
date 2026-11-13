@@ -885,3 +885,205 @@ Every phase reports verified. The dots are the one-per-second heartbeat while th
 [ok] Phase 6 debug and hardening verified.   (added in Phase 6)
 ......................................................................................
 ```
+
+---
+
+## Phase 10 additions (V1 core)
+
+Captured by `python build.py test` (4 CPUs). Passing checks are left out;
+the end is the typed session: the harness logs in as `tester` and types
+commands over the serial line and (for `about`) on the PS/2 keyboard.
+
+```text
+[input] PS/2 keyboard on (IRQ 1), PS/2 mouse on (IRQ 12), serial input on (IRQ 4)
+
+[test] ===== Phase 10: input =====
+
+[test] --- Keyboard decoder (scancode set 1) ---
+
+[test] --- Terminal (serial) decoder ---
+
+[test] --- Mouse decoder (PS/2 packets) ---
+
+[test] --- Event queue ---
+
+[test] --- PS/2 bytes through the driver ---
+
+[test] --- Devices and interrupts ---
+
+[test] --- Sleeping until input arrives ---
+
+===== Input tests: 32 passed, 0 failed =====
+[fs] Files in memory: 4 files loaded from the boot bundle (10240 bytes)
+
+[test] ===== Phase 10: files in memory =====
+
+[test] --- Paths ---
+
+[test] --- Create, write, read, list, delete ---
+
+[test] --- Bad paths and wrong types ---
+
+[test] --- Limits ---
+
+[test] --- Boot bundle (tar) ---
+
+===== Files tests: 46 passed, 0 failed =====
+
+[test] ===== Phase 10: login and shell =====
+
+[test] --- Line editor ---
+
+[test] --- Login rules ---
+
+[test] --- Shell: files ---
+
+[test] --- Shell: system commands ---
+
+[test] --- Shell: threads, checks and demos ---
+
+[lockcheck] Lock order problem on CPU 0:
+[lockcheck]   taking "demo A" while holding "demo B"
+[lockcheck]   but earlier "demo A" was held while taking "demo B".
+[lockcheck]   Two CPUs doing these at the same time would each wait
+[lockcheck]   for the other forever (a deadlock).
+[lockcheck] Earlier order ("demo A" then "demo B", CPU 0):
+Call trace (most recent call first):
+  #0 0xffffffff8020463d  demo_lock_pair+0x2d
+  #1 0xffffffff80203f96  cmd_lockdemo+0x66
+  #2 0xffffffff80201d3f  shell_run+0x2af
+  #3 0xffffffff80228881  shell_run_tests+0x2021
+  #4 0xffffffff80206454  kernel_main+0x4d4
+  #5 0xffffffff8020022a  _start+0x4a
+[lockcheck] Now:
+Call trace (most recent call first):
+  #0 0xffffffff80217eaf  lock_irqs_off+0x8f
+  #1 0xffffffff8020463d  demo_lock_pair+0x2d
+  #2 0xffffffff80203fba  cmd_lockdemo+0x8a
+  #3 0xffffffff80201d3f  shell_run+0x2af
+  #4 0xffffffff80228881  shell_run_tests+0x2021
+  #5 0xffffffff80206454  kernel_main+0x4d4
+  #6 0xffffffff8020022a  _start+0x4a
+
+[#PF] Page fault
+[#PF]   faulting address : 0x0000000000000000 (null page)
+[#PF]   instruction ptr  : 0xffffffff802046a9
+[#PF]   error code       : 0x0 [P=0 W=0 U=0 RSVD=0 I/D=0]
+[#PF]   access           : read
+[#PF]   mode             : kernel
+[#PF]   cause            : page not present
+
+[crash] Thread "crashdemo" (TID 339) crashed: Page fault (#PF)
+[crash] It touched address 0x0000000000000000, which is not usable memory.
+[crash] Registers:
+  rip=0xffffffff802046a9 cs=0008 rflags=0x0000000000010297
+  rsp=0xffffe00000027fb0 ss=0010
+  rax=0x0000000000000000 rbx=0x0000000000000000 rcx=0x0000000000000000
+  rdx=0x0000000000000000 rsi=0x0000000000000001 rdi=0x0000000000000000
+  rbp=0xffffe00000027fc0 r8 =0x0000000000000000 r9 =0x0000000000003068
+  r10=0x0000000000000338 r11=0x00000000000000d8 r12=0xffff800000a88380
+  r13=0x0000000000000000 r14=0x0000000000000000 r15=0x0000000000000000
+  cr2=0x0000000000000000 cr3=0x000000001fdd6000
+Call trace (most recent call first):
+  #0 0xffffffff802046a9  crash_thread+0x39
+  #1 0xffffffff80213b8a  thread_bootstrap+0x2a
+  #2 0xffffffff8022d595  thread_trampoline+0x8
+[crash] Only this thread was stopped; the rest of the system keeps running.
+
+[crash] Thread "crashdemo" (TID 340) crashed: Divide-by-zero (#DE)
+[crash] Registers:
+  rip=0xffffffff8020469a cs=0008 rflags=0x0000000000010246
+  rsp=0xffffe00000027fb0 ss=0010
+  rax=0x0000000000000001 rbx=0x0000000000000001 rcx=0x0000000000000000
+  rdx=0x0000000000000000 rsi=0x0000000000000001 rdi=0x0000000000000001
+  rbp=0xffffe00000027fc0 r8 =0x0000000000000000 r9 =0x0000000000003071
+  r10=0x0000000000000380 r11=0x00000000000000d8 r12=0xffff800000a88380
+  r13=0x0000000000000000 r14=0x0000000000000000 r15=0x0000000000000000
+  cr2=0x0000000000000000 cr3=0x000000001fdd6000
+Call trace (most recent call first):
+  #0 0xffffffff8020469a  crash_thread+0x2a
+  #1 0xffffffff80213b8a  thread_bootstrap+0x2a
+  #2 0xffffffff8022d595  thread_trampoline+0x8
+[crash] Only this thread was stopped; the rest of the system keeps running.
+
+[crash] Thread "crashdemo" (TID 341) crashed: Invalid opcode (#UD)
+[crash] Registers:
+  rip=0xffffffff8020469e cs=0008 rflags=0x0000000000010246
+  rsp=0xffffe00000027fb0 ss=0010
+  rax=0xffff800000a88380 rbx=0x0000000000000002 rcx=0x0000000000000000
+  rdx=0x0000000000000000 rsi=0x0000000000000001 rdi=0x0000000000000002
+  rbp=0xffffe00000027fc0 r8 =0x0000000000000000 r9 =0x0000000000003079
+  r10=0x00000000000003c0 r11=0x00000000000000d8 r12=0xffff800000a88380
+  r13=0x0000000000000000 r14=0x0000000000000000 r15=0x0000000000000000
+  cr2=0x0000000000000000 cr3=0x000000001fdd6000
+Call trace (most recent call first):
+  #0 0xffffffff8020469e  crash_thread+0x2e
+  #1 0xffffffff80213b8a  thread_bootstrap+0x2a
+  #2 0xffffffff8022d595  thread_trampoline+0x8
+[crash] Only this thread was stopped; the rest of the system keeps running.
+
+===== Login and shell tests: 58 passed, 0 failed =====
+
+[ok] Kernel started successfully.
+[ok] Phase 3 memory management verified.
+[ok] Phase 4 process management verified.
+[ok] Phase 5 scheduler verified.
+[ok] Phase 6 debug and hardening verified.
+[ok] Phase 7 modern hardware verified.
+[ok] Phase 8 memory that scales verified.
+[ok] Phase 9 multi-core verified.
+[ok] Phase 10 input verified.
+[ok] Phase 10 files in memory verified.
+[ok] Phase 10 login and shell verified.
+[ok] 516 boot self-checks passed, 0 failed.
+
+   B H A R A T   O S   -   V1 core
+============================================
+Log in with any name (letters and digits). Example: asha
+
+BharatOS login: tester
+
+Welcome to BharatOS!
+
+Type 'help' to see what you can do. Your files are in memory: they are
+kept while the machine runs and start fresh at the next boot.
+
+Hello, tester! Type 'help' to see what you can do.
+tester@bharat:~$ echo typed at the prompt > t.txt
+tester@bharat:~$ cat t.txt
+typed at the prompt
+tester@bharat:~$ QEMU 11.1.0 monitor - type 'help' for more information
+bout
+BharatOS V1 core: keyboard, mouse, files in memory, login and terminal
+An operating system written from scratch for x86-64 PCs, in C and assembly.
+  CPUs:        4, each with its own run queue; idle CPUs steal work
+  Memory:      511 MiB; buddy page allocator, slab caches, demand paging
+  Scheduler:   preemptive, tickless (no timer interrupt when idle)
+  Safety:      lock-order checker, heap poisoning, stack canaries,
+               crash reports with function names
+  Self-checks: 516 passed at this boot
+tester@bharat:~$ checks
+Boot self-tests (run at every start):
+  Memory management         114 passed
+  Processes and threads      83 passed
+  Scheduler                  26 passed
+  Debug and hardening        29 passed
+  Modern hardware            37 passed
+  Memory that scales         62 passed
+  Multi-core                 29 passed
+  Input                      32 passed
+  Files                      46 passed
+  Login and shell            58 passed
+  Total                     516 passed, 0 failed
+Live checks, now:
+  [ok] kernel heap is consistent
+  [ok] physical page allocator is consistent
+  [ok] scheduler queues are consistent
+  [ok] file tree is consistent
+  [ok] a file can be written, read and deleted
+  [ok] a thread can sleep and be woken
+  [ok] the lock-order checker is learning
+  [ok] every other CPU answers a request
+All good: 516 boot checks and 8 live checks passed.
+tester@bharat:~$
+```

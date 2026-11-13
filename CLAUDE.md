@@ -32,8 +32,9 @@ threads, scheduler) are done and tested. The next work is Phases 6–20.
 python scripts/fetch_limine.py      # once: download the bootloader into tools/
 python build.py                     # build kernel + disk image (build/bharat.img)
 python build.py run                 # boot in QEMU (BIOS), serial in terminal; quit: Ctrl+A then X
+python build.py run --window        # same, plus a QEMU window showing the screen (PS/2 keyboard/mouse)
 python build.py run-uefi            # boot through UEFI firmware
-python build.py test                # build + boot + check all self-tests and budgets (exit 0 = pass); --smp N (default 4)
+python build.py test                # build + boot + self-tests + budgets + a typed login session (exit 0 = pass); --smp N (default 4)
 python build.py test-faults         # build 13 crash-on-purpose kernels, check each report
 python build.py unit                # host unit tests: heap, scheduler, buddy, slab (millions of cases)
 python build.py bench               # benchmarks -> appends a row to docs/benchmarks.md
@@ -55,18 +56,22 @@ scripts/                 fat32.py (disk image), test_boot.py (QEMU test harness)
                          ksyms.py (symbol table), budgets.py (size/boot-time limits), bharat.gdb
 .github/workflows/       CI: one quick job (unit tests + one BIOS boot test)
 boot/limine.conf         boot menu
+boot/bundle/             files packed into the boot bundle (tar) and loaded into ramfs at boot
 kernel/
   arch/x86_64/           CPU-specific: entry.asm, linker.ld, GDT/TSS, IDT, interrupts, APIC,
                          clock (calibration, one-shot alarms), early PIT/PIC, context switch
   acpi/                  ACPI table parsing (MADT, HPET, MCFG)
   pci/                   PCI scan (ECAM or I/O ports)
-  core/                  kernel_main (boot order) and panic
+  core/                  kernel_main (boot order), panic, contained crashes (crash.c)
   mm/                    buddy allocator (pmm), slab caches, page tables (vmm), heap,
                          memory objects/regions/demand paging/COW (vm), page faults
   proc/                  processes, threads, kernel stacks
-  sched/                 scheduler (per-CPU run queues, work stealing)
+  sched/                 scheduler (per-CPU run queues, work stealing), wait queues
   smp/                   CPU start-up, per-CPU data, spinlocks + lock-order checker, IPIs, RCU
   drivers/               device drivers (serial, screen console)
+  input/                 input event queue; keyboard, mouse and serial decoders; PS/2 + serial IRQs
+  fs/                    files in memory (ramfs) and the boot-bundle (tar) loader
+  apps/                  V1 apps as kernel threads: console (login), shell, line editor
   lib/                   kprintf, string, box drawing
   trace/                 call traces (backtrace.c + generated symbol table), event trace ring
   include/               third-party headers (limine.h)
