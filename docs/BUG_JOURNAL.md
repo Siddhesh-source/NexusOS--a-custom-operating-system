@@ -269,3 +269,20 @@ New entries go at the end. Entries 1–7 come from Phases 2–5 (see
 - **Fix:** the harness sends `\n`. The kernel's serial decoder accepts
   `\r`, `\n` and `\r\n` as one Enter, so both work.
 - **Guarding test:** the typed session in `python build.py test`.
+
+### 20. "The work spread over every CPU" failed once in CI (Phase 9 test)
+- **Symptom:** in one CI run the work-stealing test reported the busy
+  threads ran on CPUs 0x7 of 4, so that check failed. The same code
+  passed locally and on the next CI run. The shell's `checks` test failed
+  in the same run only because it reports any failed boot suite.
+- **How found:** the CI log: "8 threads finished in 245 ms (one CPU:
+  about 240 ms) ... ran on CPUs 0x7".
+- **Root cause:** a race in the test, not the scheduler. CI's QEMU runs
+  every guest CPU on one host thread, taking turns, so here there was no
+  speed-up at all: the eight threads finished before CPU 3 got a turn to
+  steal one.
+- **Fix:** while the spread is being tested, threads that finish their
+  work keep spinning (up to 3 s) until every CPU has run some of it, so
+  an idle CPU always finds something to steal. `checks` live waits are
+  longer, and its test prints the command's output if it fails.
+- **Guarding test:** the same check, now on 1, 2 and 4 CPUs every boot.

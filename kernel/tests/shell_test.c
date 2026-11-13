@@ -200,7 +200,9 @@ static void test_threads_commands(void)
     CHECK(run("kill 0") != 0 && has("main thread") && run("kill 99999") != 0 && run("kill abc") != 0,
           "kill refuses the main thread, unknown numbers and words");
 
-    CHECK(run("checks") == 0 && has("All good") && has("Total"), "checks: boot results plus live checks all pass");
+    if (!CHECK(run("checks") == 0 && has("All good") && has("Total"),
+               "checks: boot results plus live checks all pass"))
+        kprintf("%s", out_buf);             /* show which check failed */
     CHECK(run("lockdemo") == 0 && has("caught it"), "lockdemo: the checker catches the inversion, system keeps going");
 
     struct crash_info c0, c1;
