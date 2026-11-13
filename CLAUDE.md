@@ -33,8 +33,8 @@ python scripts/fetch_limine.py      # once: download the bootloader into tools/
 python build.py                     # build kernel + disk image (build/bharat.img)
 python build.py run                 # boot in QEMU (BIOS), serial in terminal; quit: Ctrl+A then X
 python build.py run-uefi            # boot through UEFI firmware
-python build.py test                # build + boot + check all self-tests and budgets (exit 0 = pass)
-python build.py test-faults         # build 12 crash-on-purpose kernels, check each report
+python build.py test                # build + boot + check all self-tests and budgets (exit 0 = pass); --smp N (default 4)
+python build.py test-faults         # build 13 crash-on-purpose kernels, check each report
 python build.py unit                # host unit tests: heap, scheduler, buddy, slab (millions of cases)
 python build.py bench               # benchmarks -> appends a row to docs/benchmarks.md
 python build.py debug               # QEMU paused for GDB on :1234; then: gdb -x scripts/bharat.gdb
@@ -64,7 +64,8 @@ kernel/
   mm/                    buddy allocator (pmm), slab caches, page tables (vmm), heap,
                          memory objects/regions/demand paging/COW (vm), page faults
   proc/                  processes, threads, kernel stacks
-  sched/                 scheduler
+  sched/                 scheduler (per-CPU run queues, work stealing)
+  smp/                   CPU start-up, per-CPU data, spinlocks + lock-order checker, IPIs, RCU
   drivers/               device drivers (serial, screen console)
   lib/                   kprintf, string, box drawing
   trace/                 call traces (backtrace.c + generated symbol table), event trace ring
@@ -178,8 +179,8 @@ compiled; every folder with a `.h` is on the include path. So:
 - `panic("plain description")` only for kernel bugs/corrupted state, never
   for bad input from a user program.
 - Shared kernel data (heap, PMM, VMM, scheduler lists, process tables) is
-  changed only inside `IRQ_GUARD()`. Never allocate memory or sleep inside
-  the timer interrupt path.
+  changed only while holding its named spinlock (`SPIN_GUARD`). Never
+  allocate memory or sleep inside the timer interrupt path.
 - The kernel is built with `-mno-sse`: no floating point in kernel code.
 - No new external dependencies. The build must keep working with just
   Python, Clang/LLD, NASM and QEMU on Windows, Linux and WSL.
@@ -195,8 +196,10 @@ compiled; every folder with a `.h` is on the include path. So:
 - Every resource is a kernel object reached only through a handle, checked
   with `handle_get()` for type and rights. There is no other path, and
   rights can only shrink when handles are duplicated or passed on.
-- Until Phase 9, shared data uses `IRQ_GUARD()`; after it, named spinlocks
-  with a lock class (checked by the lock-order checker).
+- Shared data uses named spinlocks with a lock class (`SPIN_GUARD(&lock)`,
+  checked by the lock-order checker). `IRQ_GUARD()` only stops this CPU
+  from being preempted: use it for per-CPU data only. Never yield or
+  sleep while holding a spinlock.
 - A fault from ring 3 kills only that process. A fault in ring 0 panics.
 - Fixed-size tables and rings; check every limit and test hitting it.
 

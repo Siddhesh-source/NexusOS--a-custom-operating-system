@@ -21,7 +21,15 @@ REQUIRED = [
     "[ok] Phase 6 debug and hardening verified.",
     "[ok] Phase 7 modern hardware verified.",
     "[ok] Phase 8 memory that scales verified.",
+    "[ok] Phase 9 multi-core verified.",
 ]
+
+# CPUs QEMU gives the kernel (build.py --smp sets this).
+QEMU_SMP = 4
+# "single": one host thread runs every guest CPU in turn, so timing checks
+# do not depend on how busy the host's cores are. "multi" (benchmarks, or
+# a manual stress run): one host thread per guest CPU, truly in parallel.
+QEMU_THREADS = "single"
 
 # Any of these means the boot went wrong, even if the markers above appear.
 FORBIDDEN = [
@@ -63,12 +71,18 @@ FAULT_DEMO_EXPECT = {
             "kmalloc", "debug_demo_use_after_free+0x"],
     "overflow": ["allocation", "of 20 bytes", "PANIC: heap: overflow detected",
                  "kfree+0x", "debug_demo_heap_overflow+0x"],
+    # Two locks taken in opposite orders: the lock-order checker names
+    # both classes and prints the earlier order's call trace and today's.
+    "lockorder": ["[lockcheck] Lock order problem",
+                  'taking "test A" while holding "test B"',
+                  "Earlier order", "take_a_then_b+0x", "take_b_then_a+0x",
+                  "PANIC: lock order problem"],
 }
 
 # Demos whose expected output legitimately contains a normally-forbidden marker.
 FAULT_DEMO_ALLOW = {"ctx": ["KERNEL PANIC"], "panic": ["KERNEL PANIC"],
                     "smash": ["KERNEL PANIC"], "uaf": ["KERNEL PANIC"],
-                    "overflow": ["KERNEL PANIC"]}
+                    "overflow": ["KERNEL PANIC"], "lockorder": ["KERNEL PANIC"]}
 
 
 def find_qemu() -> str:
@@ -83,7 +97,7 @@ def cmd_for(image: Path) -> List[str]:
     if not qemu:
         print("[ERROR] qemu-system-x86_64 not found", file=sys.stderr)
         return []
-    return [qemu, "-m", "512M",
+    return [qemu, "-m", "512M", "-smp", str(QEMU_SMP), "-accel", f"tcg,thread={QEMU_THREADS}",
             "-drive", f"file={image},format=raw,media=disk,if=ide",
             "-nographic", "-no-reboot", "-no-shutdown"]
 
@@ -162,6 +176,7 @@ def run_boot_test(image: Path, timeout: int = 120) -> int:
         print("[PASS] Phase 6 debug and hardening tests passed.")
         print("[PASS] Phase 7 modern hardware tests passed.")
         print("[PASS] Phase 8 memory-that-scales tests passed.")
+        print(f"[PASS] Phase 9 multi-core tests passed ({QEMU_SMP} CPUs).")
         return 0
     print("[FAIL] Boot did not complete cleanly.")
     for m in FORBIDDEN:
@@ -179,7 +194,8 @@ def run_fault_demo_test(image: Path, demo: str, timeout: int = 120) -> int:
                                         "[ok] Phase 5 scheduler verified.",
                                         "[ok] Phase 6 debug and hardening verified.",
                                         "[ok] Phase 7 modern hardware verified.",
-                                        "[ok] Phase 8 memory that scales verified."]
+                                        "[ok] Phase 8 memory that scales verified.",
+                                        "[ok] Phase 9 multi-core verified."]
     forbidden = [m for m in ["KERNEL PANIC", "[FAIL]"]
                  if m not in FAULT_DEMO_ALLOW.get(demo, [])]
     success, full, _ = boot_and_watch(image, expect, forbidden, timeout)

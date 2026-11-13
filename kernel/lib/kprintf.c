@@ -150,14 +150,15 @@ static void format(struct sink *s, const char *fmt, va_list ap)
 
 void kprintf(const char *fmt, ...)
 {
-    /* One call = one uninterrupted write, so output from preempted threads
-     * never interleaves mid-line. */
-    IRQ_GUARD();
+    /* One call = one uninterrupted write, so output from other CPUs or
+     * preempted threads never interleaves mid-line. */
+    uint64_t flags = console_lock();
     struct sink s = { .buf = NULL };
     va_list ap;
     va_start(ap, fmt);
     format(&s, fmt, ap);
     va_end(ap);
+    console_unlock(flags);
 }
 
 size_t kvsnprintf(char *buf, size_t size, const char *fmt, va_list ap)

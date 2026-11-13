@@ -1,4 +1,7 @@
 #include "serial.h"
+#include "percpu.h"
+#include "ipi.h"
+#include "panic.h"
 
 static inline void outb(uint16_t port, uint8_t val)
 {
@@ -51,17 +54,45 @@ void serial_putchar(char c)
     outb(port + REG_THR, (uint8_t)c);
 }
 
-/* Strings are written with interrupts disabled so that, once threads are
- * preemptive, one thread's output can't be split by another's. */
-static inline uint64_t serial_lock(void)
+/* The console lock: one CPU writes at a time, so lines from different
+ * CPUs (or preempted threads) never mix. It is "recursive": the CPU that
+ * holds it may take it again (kprintf -> serial_write, or an interrupt
+ * that prints while its CPU was printing). It is a leaf: nothing else is
+ * locked while holding it, so it is outside the lock-order checker.
+ * During a panic the panicking CPU takes it over (the others are being
+ * stopped and may never let go). */
+#define NO_OWNER 0xFFFFFFFFu
+static volatile uint32_t con_owner = NO_OWNER;
+static uint32_t con_depth;
+
+uint64_t console_lock(void)
 {
     uint64_t flags;
     __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) : : "memory");
+    uint32_t me = cpu_id();
+    if (__atomic_load_n(&con_owner, __ATOMIC_RELAXED) == me) {
+        con_depth++;
+        return flags;
+    }
+    for (;;) {
+        uint32_t expect = NO_OWNER;
+        if (__atomic_compare_exchange_n(&con_owner, &expect, me, false,
+                                        __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+            break;
+        if (kernel_panicking()) {
+            __atomic_store_n(&con_owner, me, __ATOMIC_SEQ_CST);
+            break;
+        }
+        cpu_relax();
+    }
+    con_depth = 1;
     return flags;
 }
 
-static inline void serial_unlock(uint64_t flags)
+void console_unlock(uint64_t flags)
 {
+    if (--con_depth == 0)
+        __atomic_store_n(&con_owner, NO_OWNER, __ATOMIC_RELEASE);
     if (flags & (1ULL << 9))
         __asm__ volatile("sti" : : : "memory");
 }
@@ -70,32 +101,34 @@ void serial_puts(const char *s)
 {
     if (s == NULL)
         return;
-    uint64_t flags = serial_lock();
+    uint64_t flags = console_lock();
     while (*s) {
         if (*s == '\n')
             serial_putchar('\r');
         serial_putchar(*s++);
     }
-    serial_unlock(flags);
+    console_unlock(flags);
 }
 
 void serial_write(const char *buf, uint64_t n)
 {
     if (buf == NULL)
         return;
-    uint64_t flags = serial_lock();
+    uint64_t flags = console_lock();
     for (uint64_t i = 0; i < n; i++) {
         if (buf[i] == '\n')
             serial_putchar('\r');
         serial_putchar(buf[i]);
     }
-    serial_unlock(flags);
+    console_unlock(flags);
 }
 
 void serial_put_hex(uint64_t value)
 {
     static const char d[] = "0123456789abcdef";
+    uint64_t flags = console_lock();
     serial_puts("0x");
     for (int i = 60; i >= 0; i -= 4)
         serial_putchar(d[(value >> i) & 0xF]);
+    console_unlock(flags);
 }

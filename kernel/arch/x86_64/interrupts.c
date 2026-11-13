@@ -7,6 +7,7 @@
 #include "backtrace.h"
 #include "trace.h"
 #include "apic.h"
+#include "panic.h"
 
 static const char *const exception_names[32] = {
     "Divide-by-zero (#DE)",           "Debug (#DB)",
@@ -44,6 +45,8 @@ void interrupt_dump_frame(const struct interrupt_frame *f)
 
 void exception_fatal(const struct interrupt_frame *f, const char *reason)
 {
+    if (!panic_begin())
+        halt_forever();         /* another CPU is already reporting a crash */
     kprintf("\n[exception] %s\n", exception_name(f->vector));
     kprintf("[exception] Exception number: %lu\n", f->vector);
     kprintf("[exception] Error code: 0x%lx\n", f->error_code);
@@ -88,6 +91,10 @@ void interrupt_dispatch(struct interrupt_frame *frame)
         return;
     }
     switch (frame->vector) {
+    case 2: /* NMI: another CPU is reporting a crash and stops us */
+        if (kernel_panic_started())
+            halt_forever();
+        exception_fatal(frame, "Unexpected non-maskable interrupt");
     case 14: /* Page fault */
         page_fault_handler(frame);
         break;

@@ -4,6 +4,8 @@
 #include "kprintf.h"
 #include "panic.h"
 #include "serial.h"
+#include "percpu.h"
+#include "ipi.h"
 
 unsigned unit_passed, unit_failed;
 uint64_t unit_fake_tsc;
@@ -36,7 +38,17 @@ uint64_t unit_rand_below(uint64_t n)
     return n ? unit_rand() % n : 0;
 }
 
+/* ---- one CPU, no other CPUs to talk to --------------------------------- */
+
+struct percpu unit_cpus[SMP_MAX_CPUS] = { [0] = { .self = &unit_cpus[0], .online = 1 } };
+
+void ipi_reschedule(unsigned cpu) { (void)cpu; }
+void cpu_relax(void) { }
+
 /* ---- serial port: straight to the host's standard output --------------- */
+
+uint64_t console_lock(void) { return 0; }
+void console_unlock(uint64_t flags) { (void)flags; }
 
 void serial_write(const char *buf, uint64_t n)
 {

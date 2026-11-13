@@ -51,6 +51,8 @@ struct gdt_ptr {
 #define GDT_TSS_SEL     0x18  /* Third descriptor, index 3 */
 
 void gdt_init(void);
+/* Build and load CPU `cpu`'s own GDT and TSS (called on that CPU). */
+void gdt_init_cpu(unsigned cpu);
 void gdt_flush(uint64_t);
 void gdt_load_tr(uint16_t selector);
 

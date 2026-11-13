@@ -98,15 +98,16 @@ static inline void irq_restore(uint64_t flags)
         __asm__ volatile("sti" : : : "memory");
 }
 
-/* Critical section for the rest of the enclosing scope (single CPU).
+/* Interrupts off on THIS CPU for the rest of the enclosing scope.
  *
  *     IRQ_GUARD();    // interrupts off until the function/block exits
  *
  * Restores the previous interrupt state on every exit path, including early
- * returns. With preemptive scheduling this is what keeps shared kernel data
- * (heap, PMM, VMM, stacks, scheduler queues) consistent: a thread cannot be
- * preempted halfway through modifying them. Guards nest. For SMP this is the
- * single place to add a spinlock alongside the interrupt disable. */
+ * returns. Guards nest. It stops this CPU from being preempted, so it is
+ * enough for data only this CPU touches (its per-CPU data, its APIC). It
+ * does NOT stop other CPUs: data shared between CPUs (heap, page tables,
+ * scheduler queues, ...) uses SPIN_GUARD(&lock) from spinlock.h, which
+ * also turns interrupts off. */
 static inline void irq_guard_release(uint64_t *flags)
 {
     irq_restore(*flags);

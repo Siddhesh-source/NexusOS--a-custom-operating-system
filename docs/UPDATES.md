@@ -246,7 +246,7 @@ boot, bad-input tests, a one-minute demo, and docs. **New rules:**
 | 6 | Debug and hardening foundation ✅ done | engineering quality | M |
 | 7 | Modern hardware ✅ done | serious OS | L |
 | 8 | Memory that scales ✅ done | serious OS | L |
-| 9 | Multi-core | concurrency | L |
+| 9 | Multi-core ✅ done | concurrency | L |
 | 10 | User mode, handles and async rings | security, performance | L |
 | 11 | Microkernel IPC and services | architecture | L |
 | 12 | Shell, self-check and explain | USP 1, 2 | M |
@@ -332,6 +332,12 @@ buddy split/merge, slab exhaustion, fault-in and copy-on-write; host-side
 unit tests run 1M random alloc/free sequences; bench shows the speedup.
 
 ### Phase 9: Multi-core
+**Status: ✅ done.** See `phases/phase-9-multi-core.md`. Handle lookup
+under RCU waits for handles (Phase 10); the process and thread tables use
+RCU now. Boot tests run QEMU's guest CPUs on one host thread
+(`thread=single`); the bench and manual stress runs use parallel host
+threads (`thread=multi`).
+
 1. Wake the other cores (INIT/SIPI) using the trampoline from Limine's
    SMP feature.
 2. Per-CPU data (`current` thread, run queue, TSS, GDT) via `GS` base.
@@ -733,6 +739,11 @@ operation, ring batch of 64, IPC round trip, page fault, 4 KiB file read
 | D19 | Heap poisoning and red zones always on | memory bugs caught at the moment of reuse/free, in every build | debug-only builds | heap speed matters (revisit with the slab allocator, Phase 8) |
 | D20 | Tickless timer with lazy re-arming: reprogram the APIC alarm only when a deadline moves earlier | idle costs no interrupts; a switch costs no timer register writes | periodic tick; reprogram on every decision (doubled switch cost) | many CPUs need per-CPU alarms (Phase 9) |
 | D21 | Timing tests check the kernel's own share; end-to-end latency under QEMU is reported, not required | the host (Windows timer grid, load) adds 0-15 ms the kernel cannot control; strict end-to-end checks were flaky | strict 1 ms end to end | tests run on real hardware or KVM |
+| D23 | Run-queue lock held across the context switch; the next thread releases it | no CPU can wake, steal or free a thread whose registers are still being saved, with no extra "on CPU" flag | per-thread on-CPU flag with spinning waiters | many CPUs contend on one queue |
+| D24 | `smp_call` waiters keep answering requests in every spin loop; RCU acks only from the interrupt | TLB shootdowns can be sent while holding locks without deadlock; one IPI round gives an RCU grace period | forbid shootdowns under locks (big restructuring); counter-based RCU | shootdown cost shows up in profiles (batch them) |
+| D25 | RCU readers = interrupts off; grace period = one IPI answered by every other CPU | no preemption counter needed; reuses the shootdown mailbox | callback-based RCU with batching | frees under RCU become frequent |
+| D26 | Work stealing by idle CPUs (try-lock), placement on the least-loaded CPU, idle CPUs woken by IPI in rotation | simple, no periodic balancer tick (stays tickless) | periodic load balancer | priorities or NUMA arrive |
+| D27 | Boot tests run QEMU's CPUs on one host thread (`thread=single`) | results do not depend on how busy the host is; parallel runs remain a manual stress and the bench mode | `thread=multi` in every test (flaky timing checks) | CI gets KVM |
 | D22 | Keep the buddy allocator even though a next-fit bitmap is faster for single pages (16 vs 37 cycles natively) | contiguous blocks, per-page reference counts for COW, steady under fragmentation; a 64-page hot cache covers the common case | keep the bitmap | single-page allocation shows up in profiles (per-CPU caches, Phase 9) |
 
 Earlier decisions in `design/HLD.md` §6 still apply unless replaced above.

@@ -8,8 +8,10 @@
  * safe from the timer interrupt and always on. When the ring is full the
  * oldest events are overwritten; `trace_dump()` prints the newest ones.
  *
- * Limits: single CPU (protected by IRQ_GUARD); two 64-bit arguments per
- * event; the meaning of the arguments depends on the event type. */
+ * Limits: one ring for all CPUs, written without a lock (each event
+ * records its CPU; an event still being written when the ring is read is
+ * skipped); two 64-bit arguments per event; the meaning of the arguments
+ * depends on the event type. */
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -28,6 +30,7 @@ typedef enum {
     TRACE_TEST,             /* a, b = free for self-tests */
     TRACE_ALARM_SET,        /* a = deadline (ns), b = now (ns) */
     TRACE_ALARM_FIRE,       /* a = deadline (ns), b = now (ns) */
+    TRACE_SCHED_STEAL,      /* a = TID taken, b = CPU it was taken from */
     TRACE_TYPE_COUNT
 } trace_type_t;
 
@@ -35,7 +38,7 @@ struct trace_event {
     uint64_t tsc;           /* CPU time stamp counter when recorded */
     uint64_t seq;           /* 1, 2, 3, ... in recording order */
     uint32_t type;          /* trace_type_t */
-    uint32_t reserved;
+    uint32_t cpu;           /* CPU that recorded it */
     uint64_t a, b;
 };
 

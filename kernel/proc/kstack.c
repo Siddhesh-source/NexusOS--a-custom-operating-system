@@ -5,6 +5,7 @@
 #include "kprintf.h"
 #include "panic.h"
 #include "string.h"
+#include "spinlock.h"
 
 #define KSTACK_PAGES (KSTACK_SIZE / PAGE_SIZE)
 
@@ -13,6 +14,7 @@ _Static_assert(KSTACK_SLOT_SIZE > KSTACK_SIZE, "slot must leave room for a guard
 
 static bool slot_used[KSTACK_MAX_SLOTS];
 static unsigned slots_in_use;
+static struct spinlock kstack_lock = SPINLOCK_INIT(LOCK_CLASS_KSTACK);
 
 static inline uint64_t slot_top(int slot)
 {
@@ -36,7 +38,7 @@ void kstack_init(void)
 
 kstack_status_t kstack_alloc(struct kstack *out)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&kstack_lock);
     int slot = -1;
     for (int i = 0; i < KSTACK_MAX_SLOTS; i++) {
         if (!slot_used[i]) {
@@ -77,7 +79,7 @@ kstack_status_t kstack_alloc(struct kstack *out)
 
 kstack_status_t kstack_free(struct kstack *s)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&kstack_lock);
     if (s == NULL || s->slot < 0 || s->slot >= KSTACK_MAX_SLOTS || !slot_used[s->slot]
         || s->top != slot_top(s->slot) || s->base != s->top - KSTACK_SIZE)
         return KSTACK_ERR_INVALID;

@@ -142,7 +142,7 @@ void fbcon_putc(char ch)
 {
     if (!st.active)
         return;
-    IRQ_GUARD();
+    /* Called with the console lock held (from serial_putchar's mirror). */
     uint8_t c = (uint8_t)ch;
     if (fb.utf8_left > 0) {
         if ((c & 0xC0) == 0x80) {
@@ -195,8 +195,9 @@ bool fbcon_init(void *addr, uint64_t width, uint64_t height, uint64_t pitch,
 
 void fbcon_get_info(struct fbcon_info *out)
 {
-    IRQ_GUARD();
+    uint64_t flags = console_lock();
     *out = st;
+    console_unlock(flags);
 }
 
 uint32_t fbcon_read_pixel(uint64_t x, uint64_t y)

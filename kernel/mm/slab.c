@@ -4,6 +4,7 @@
 #include "kprintf.h"
 #include "panic.h"
 #include "string.h"
+#include "spinlock.h"
 
 #define SLAB_MAGIC   0x534C4142u        /* "SLAB" */
 #define MAX_SLOTS    256                /* PAGE_SIZE / 16 */
@@ -22,6 +23,7 @@ struct slab {
 };
 
 struct slab_cache {
+    struct spinlock lock;               /* guards everything below */
     const char *name;
     uint32_t size;                      /* slot size */
     uint32_t first;                     /* offset of slot 0 in the page */
@@ -33,6 +35,7 @@ struct slab_cache {
 
 static struct slab_cache caches[SLAB_MAX_CACHES];
 static unsigned cache_count;
+static struct spinlock create_lock = SPINLOCK_INIT(LOCK_CLASS_SLAB);
 
 static inline uint64_t align_up(uint64_t v, uint64_t a)
 {
@@ -83,11 +86,12 @@ struct slab_cache *slab_create(const char *name, size_t size, size_t align, uint
         align = 8;
     if (size == 0 || size > SLAB_MAX_OBJECT || (align & (align - 1)) != 0 || align > 256)
         return NULL;
-    IRQ_GUARD();
+    SPIN_GUARD(&create_lock);
     if (cache_count == SLAB_MAX_CACHES)
         return NULL;
     struct slab_cache *c = &caches[cache_count++];
     memset(c, 0, sizeof(*c));
+    spin_lock_init(&c->lock, LOCK_CLASS_SLAB);
     c->name = name;
     c->size = (uint32_t)align_up(size < 16 ? 16 : size, align);
     c->first = (uint32_t)align_up(sizeof(struct slab), align);
@@ -133,7 +137,7 @@ void *slab_alloc(struct slab_cache *c)
 {
     if (c == NULL)
         return NULL;
-    IRQ_GUARD();
+    SPIN_GUARD(&c->lock);
     if (c->limit != 0 && c->in_use >= c->limit) {
         c->failures++;
         return NULL;
@@ -186,7 +190,7 @@ slab_status_t slab_free(struct slab_cache *c, void *obj)
 {
     if (obj == NULL)
         return SLAB_OK;
-    IRQ_GUARD();
+    SPIN_GUARD(&c->lock);
     struct slab *s = (struct slab *)((uint64_t)obj & ~(PAGE_SIZE - 1));
     uint64_t off = (uint64_t)obj - (uint64_t)s;
     /* Check the page really is a slab of this cache before trusting it:
@@ -230,7 +234,7 @@ slab_status_t slab_free(struct slab_cache *c, void *obj)
 
 void slab_shrink(struct slab_cache *c)
 {
-    IRQ_GUARD();
+    SPIN_GUARD(&c->lock);
     while (c->lists[LIST_EMPTY] != NULL) {
         struct slab *s = c->lists[LIST_EMPTY];
         list_del(c, s);
@@ -244,7 +248,7 @@ void slab_shrink(struct slab_cache *c)
 
 void slab_get_stats(const struct slab_cache *c, struct slab_stats *out)
 {
-    IRQ_GUARD();
+    SPIN_GUARD((struct spinlock *)&c->lock);
     out->name = c->name;
     out->object_size = c->size;
     out->per_slab = c->per_slab;
@@ -270,7 +274,7 @@ void slab_print_all(void)
 
 bool slab_check(struct slab_cache *c)
 {
-    IRQ_GUARD();
+    SPIN_GUARD(&c->lock);
     uint64_t in_use = 0, slabs = 0;
     for (unsigned l = 0; l < LIST_COUNT; l++) {
         struct slab *prev = NULL;

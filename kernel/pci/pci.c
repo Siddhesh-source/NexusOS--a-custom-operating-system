@@ -1,4 +1,5 @@
 #include "pci.h"
+#include "spinlock.h"
 #include "acpi.h"
 #include "vmm.h"
 #include "cpu.h"
@@ -47,8 +48,9 @@ uint32_t pci_config_read32(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t offset)
         return cfg != NULL ? cfg[offset / 4] : 0xFFFFFFFF;
     }
     /* The address and data ports are one shared pair: keep the two
-     * accesses together. */
-    IRQ_GUARD();
+     * accesses together, even against other CPUs. */
+    static struct spinlock pci_lock = SPINLOCK_INIT(LOCK_CLASS_PCI);
+    SPIN_GUARD(&pci_lock);
     outl(PCI_CONFIG_ADDRESS, (1u << 31) | ((uint32_t)bus << 16) | ((uint32_t)dev << 11)
                              | ((uint32_t)fn << 8) | offset);
     return inl(PCI_CONFIG_DATA);
