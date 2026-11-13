@@ -5,6 +5,8 @@
 #include "panic.h"
 #include "kprintf.h"
 #include "string.h"
+#include "heap.h"
+#include "cpu.h"
 #include <stddef.h>
 
 #ifndef NULL
@@ -107,6 +109,59 @@ static void test_stack_guard(void)
     CHECK((__stack_chk_guard & 0xff) == 0, "canary's low byte is 0 (stops string copies)");
 }
 
+/* ---- heap poisoning and red zones -------------------------------------- */
+
+static bool all_bytes(const uint8_t *p, size_t n, uint8_t v)
+{
+    for (size_t i = 0; i < n; i++)
+        if (p[i] != v)
+            return false;
+    return true;
+}
+
+static void test_heap_poison(void)
+{
+    kprintf("\n[debug] Heap poisoning and red zones\n");
+    /* Nothing else may allocate while freed memory is deliberately dirty,
+     * or that allocation would (correctly) panic. */
+    IRQ_GUARD();
+
+    CHECK(heap_check(), "heap is consistent before the test");
+
+    uint8_t *p = kmalloc(20);
+    CHECK(p != NULL && all_bytes(p + 20, HEAP_REDZONE, HEAP_POISON_REDZONE),
+          "allocation is followed by a red zone");
+    CHECK(p != NULL && all_bytes(p, 20, HEAP_POISON_FREE),
+          "new allocation holds the poison pattern, not old data");
+    if (p == NULL)
+        return;
+
+    memset(p, 0x11, 20);                 /* filling all 20 bytes is fine */
+    CHECK(heap_check(), "writing exactly the requested size leaves the red zone intact");
+
+    p[20] = 0x22;                        /* one byte too far */
+    kprintf("  (a red-zone report is expected next)\n");
+    CHECK(!heap_check(), "write one byte past the end is caught");
+    p[20] = HEAP_POISON_REDZONE;         /* repair so kfree does not panic */
+    CHECK(heap_check(), "heap is consistent again once repaired");
+
+    CHECK(kfree(p) == HEAP_OK, "free the block");
+    CHECK(all_bytes(p, 20 + HEAP_REDZONE, HEAP_POISON_FREE), "freed memory is poisoned");
+
+    uint8_t saved = p[8];
+    p[8] = 0x33;                         /* use after free */
+    kprintf("  (a use-after-free report is expected next)\n");
+    CHECK(!heap_check(), "write into freed memory is caught");
+    p[8] = saved;
+    CHECK(heap_check(), "heap is consistent again once repaired");
+
+    uint8_t *z = kzalloc(40);
+    CHECK(z != NULL && all_bytes(z, 40, 0) && all_bytes(z + 40, 8, HEAP_POISON_REDZONE),
+          "kzalloc zeroes only the requested bytes");
+    kfree(z);
+    CHECK(heap_check(), "heap is consistent after the test");
+}
+
 /* ---- event trace -------------------------------------------------------- */
 
 static void test_trace(void)
@@ -163,6 +218,7 @@ bool debug_run_tests(void)
     test_symbols();
     test_backtrace();
     test_stack_guard();
+    test_heap_poison();
     test_trace();
     kprintf("\n===== Debug tests: %u passed, %u failed =====\n", passed, failed);
     return failed == 0;
@@ -200,5 +256,34 @@ __attribute__((noinline)) void debug_demo_stack_smash(void)
 {
     kprintf("\n[demo] Overflowing a stack buffer past its canary...\n");
     stack_smash_victim();
+    kprintf("[demo] ERROR: the overflow was not caught\n");
+}
+
+/* Frees a block, writes into it, then allocates blocks of the same size
+ * until the allocator reaches the damaged memory and reports it. */
+__attribute__((noinline)) void debug_demo_use_after_free(void)
+{
+    kprintf("\n[demo] Writing into freed heap memory...\n");
+    uint8_t *p = kmalloc(64);
+    if (p == NULL || kfree(p) != HEAP_OK)
+        return;
+    p[0] = 0x42;
+    kprintf("[demo] Allocating until the freed block is handed out again...\n");
+    for (int i = 0; i < 100000; i++)
+        if (kmalloc(64) == NULL)
+            break;
+    kprintf("[demo] ERROR: the use after free was not caught\n");
+}
+
+/* Writes 4 bytes past the end of a 20-byte block, then frees it. */
+__attribute__((noinline)) void debug_demo_heap_overflow(void)
+{
+    kprintf("\n[demo] Writing past the end of a 20-byte heap block...\n");
+    volatile uint8_t *p = kmalloc(20);
+    if (p == NULL)
+        return;
+    for (int i = 20; i < 24; i++)
+        p[i] = 0x42;
+    kfree((void *)p);
     kprintf("[demo] ERROR: the overflow was not caught\n");
 }

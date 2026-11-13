@@ -55,11 +55,18 @@ FAULT_DEMO_EXPECT = {
     # the function returns, and the trace names the guilty function.
     "smash": ["PANIC: stack smashing detected", "Call trace",
               "stack_smash_victim+0x", "debug_demo_stack_smash+0x"],
+    # Heap poisoning: the next allocation of the damaged memory panics;
+    # kfree checks the red zone after a block.
+    "uaf": ["freed memory at", "PANIC: heap: use after free detected",
+            "kmalloc", "debug_demo_use_after_free+0x"],
+    "overflow": ["allocation", "of 20 bytes", "PANIC: heap: overflow detected",
+                 "kfree+0x", "debug_demo_heap_overflow+0x"],
 }
 
 # Demos whose expected output legitimately contains a normally-forbidden marker.
 FAULT_DEMO_ALLOW = {"ctx": ["KERNEL PANIC"], "panic": ["KERNEL PANIC"],
-                    "smash": ["KERNEL PANIC"]}
+                    "smash": ["KERNEL PANIC"], "uaf": ["KERNEL PANIC"],
+                    "overflow": ["KERNEL PANIC"]}
 
 
 def find_qemu() -> str:

@@ -14,8 +14,9 @@
 
 struct block {
     uint32_t magic;
-    uint32_t reserved;
-    uint64_t size;           /* payload bytes, multiple of HEAP_MIN_ALIGN */
+    uint32_t requested;      /* bytes the caller asked for (used blocks) */
+    uint64_t size;           /* payload bytes, multiple of HEAP_MIN_ALIGN;
+                                includes the red zone after `requested` */
     struct block *prev;
     struct block *next;
 };
@@ -58,7 +59,9 @@ static void link_after(struct block *b, struct block *nb)
     b->next = nb;
 }
 
-/* Merge `b->next` into `b`. Both must be free. */
+/* Merge `b->next` into `b`. Both must be free. The absorbed header becomes
+ * free payload, so it is poisoned like the rest (which also stops the
+ * stale header from looking like a block). */
 static void absorb_next(struct block *b)
 {
     struct block *n = b->next;
@@ -68,7 +71,52 @@ static void absorb_next(struct block *b)
         n->next->prev = b;
     else
         tail = b;
-    n->magic = 0;   /* stale headers must not look like blocks */
+    memset(n, HEAP_POISON_FREE, HDR_SIZE);
+}
+
+/* ---- poisoning ----------------------------------------------------------
+ * Invariant: every payload byte of a free block equals HEAP_POISON_FREE,
+ * and every byte of a used block after `requested` equals
+ * HEAP_POISON_REDZONE. A changed byte proves a stray write: into freed
+ * memory (use after free) or past the end of an allocation (overflow). */
+
+/* Offset of the first byte in [start, start+len) that is not `byte`, or
+ * `len` if all match. Compares 8 bytes at a time where it can. */
+static uint64_t first_changed(uint64_t start, uint64_t len, uint8_t byte)
+{
+    const uint8_t *p = (const uint8_t *)start;
+    uint64_t i = 0;
+    uint64_t word = 0x0101010101010101ULL * byte;
+    while (i < len && ((start + i) & 7) != 0) {
+        if (p[i] != byte)
+            return i;
+        i++;
+    }
+    while (i + 8 <= len && *(const uint64_t *)(p + i) == word)
+        i += 8;
+    while (i < len && p[i] == byte)
+        i++;
+    return i;
+}
+
+static uint64_t redzone_len(const struct block *b)
+{
+    return b->size - b->requested;
+}
+
+static bool redzone_intact(const struct block *b, uint64_t *bad)
+{
+    uint64_t off = first_changed(payload_of((struct block *)b) + b->requested,
+                                 redzone_len(b), HEAP_POISON_REDZONE);
+    *bad = payload_of((struct block *)b) + b->requested + off;
+    return off == redzone_len(b);
+}
+
+static bool free_poison_intact(const struct block *b, uint64_t *bad)
+{
+    uint64_t off = first_changed(payload_of((struct block *)b), b->size, HEAP_POISON_FREE);
+    *bad = payload_of((struct block *)b) + off;
+    return off == b->size;
 }
 
 /* Map `pages` fresh frames at heap_end. All-or-nothing: on failure every
@@ -110,6 +158,8 @@ static bool grow(uint64_t bytes)
     uint64_t old_end = heap_end;
     heap_end += pages * PAGE_SIZE;
     trace_event(TRACE_HEAP_GROW, heap_end, pages);
+    /* New space is free payload (or a header written just below). */
+    memset((void *)old_end, HEAP_POISON_FREE, heap_end - old_end);
 
     if (tail != NULL && tail->magic == MAGIC_FREE) {
         tail->size += heap_end - old_end;
@@ -143,9 +193,18 @@ static bool fit(struct block *b, uint64_t size, uint64_t align, uint64_t *payloa
     return true;
 }
 
-/* Carve [payload, payload+size) out of free block `b`; returns the block. */
+/* Carve [payload, payload+size) out of free block `b`; returns the block.
+ * The carved bytes must still hold the free poison: anything else means
+ * code wrote to this memory after freeing it. */
 static struct block *carve(struct block *b, uint64_t payload, uint64_t size)
 {
+    uint64_t off = first_changed(payload, size, HEAP_POISON_FREE);
+    if (off != size) {
+        kprintf("[heap] freed memory at %p was changed (byte is 0x%x, expected 0x%x)\n",
+                (void *)(payload + off), *(const uint8_t *)(payload + off), HEAP_POISON_FREE);
+        panic("heap: use after free detected: memory was written after it was freed");
+    }
+
     if (payload != payload_of(b)) {
         /* Split off the leading gap; it stays free. */
         struct block *nb = (struct block *)(payload - HDR_SIZE);
@@ -193,13 +252,20 @@ void *kmalloc_aligned(size_t size, size_t align)
         alloc_failures++;
         return NULL;
     }
-    size = align_up(size, HEAP_MIN_ALIGN);
+    uint64_t requested = size;
+    /* Room for at least HEAP_REDZONE guard bytes after the caller's data. */
+    size = align_up(size + HEAP_REDZONE, HEAP_MIN_ALIGN);
 
     for (int attempt = 0; attempt < 2; attempt++) {
         for (struct block *b = head; b != NULL; b = b->next) {
             uint64_t payload;
-            if (b->magic == MAGIC_FREE && fit(b, size, align, &payload))
-                return (void *)payload_of(carve(b, payload, size));
+            if (b->magic == MAGIC_FREE && fit(b, size, align, &payload)) {
+                struct block *nb = carve(b, payload, size);
+                nb->requested = (uint32_t)requested;
+                memset((void *)(payload + requested), HEAP_POISON_REDZONE,
+                       redzone_len(nb));
+                return (void *)payload;
+            }
         }
         /* Worst case the aligned payload needs a split-off gap in front of
          * it plus alignment slack, in addition to its own header. */
@@ -258,7 +324,16 @@ heap_status_t kfree(void *ptr)
     if (b->magic != MAGIC_USED)
         panic("heap: corrupted block header");
 
+    uint64_t bad;
+    if (!redzone_intact(b, &bad)) {
+        kprintf("[heap] allocation %p of %u bytes: byte %p past its end was changed\n",
+                ptr, b->requested, (void *)bad);
+        panic("heap: overflow detected: a write went past the end of an allocation");
+    }
+
     b->magic = MAGIC_FREE;
+    b->requested = 0;
+    memset(ptr, HEAP_POISON_FREE, b->size);
     if (b->next != NULL && b->next->magic == MAGIC_FREE)
         absorb_next(b);
     if (b->prev != NULL && b->prev->magic == MAGIC_FREE)
@@ -311,6 +386,16 @@ bool heap_check(void)
         }
         if (prev != NULL && prev->magic == MAGIC_FREE && b->magic == MAGIC_FREE) {
             kprintf("[heap] check: adjacent free blocks at %p not coalesced\n", (void *)b);
+            return false;
+        }
+        uint64_t bad;
+        if (b->magic == MAGIC_FREE && !free_poison_intact(b, &bad)) {
+            kprintf("[heap] check: freed memory at %p was written after free\n", (void *)bad);
+            return false;
+        }
+        if (b->magic == MAGIC_USED && !redzone_intact(b, &bad)) {
+            kprintf("[heap] check: red zone byte %p of block %p was overwritten\n",
+                    (void *)bad, (void *)payload_of(b));
             return false;
         }
         expect = end_of(b);

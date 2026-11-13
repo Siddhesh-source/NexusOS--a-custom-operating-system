@@ -10,12 +10,27 @@
  * When nothing fits, the heap grows by mapping fresh PMM frames at its end
  * (up to KERNEL_HEAP_MAX). Pages are never returned to the PMM.
  *
- * Every payload is at least 16-byte aligned. Not SMP-safe. */
+ * Every payload is at least 16-byte aligned. Not SMP-safe.
+ *
+ * Memory error checks (a light version of Linux's KASAN):
+ *   - free memory is filled with HEAP_POISON_FREE. Handing it out again
+ *     checks the fill; a changed byte means use after free -> panic.
+ *   - each allocation is followed by a red zone of at least HEAP_REDZONE
+ *     bytes filled with HEAP_POISON_REDZONE; kfree checks it, a changed
+ *     byte means a write past the end -> panic.
+ *   - heap_check() reports both without panicking.
+ * New allocations are not zeroed: they hold HEAP_POISON_FREE, which makes
+ * use of uninitialised memory easier to spot. Use kzalloc for zeroes.
+ * Limits: writes that skip over the red zone, and stray reads, are not
+ * caught. */
 
 #include "mm.h"
 
-#define HEAP_MIN_ALIGN   16
-#define HEAP_MAX_ALIGN   PAGE_SIZE
+#define HEAP_MIN_ALIGN       16
+#define HEAP_MAX_ALIGN       PAGE_SIZE
+#define HEAP_REDZONE         16
+#define HEAP_POISON_FREE     0xDE
+#define HEAP_POISON_REDZONE  0xFB
 
 typedef enum {
     HEAP_OK = 0,

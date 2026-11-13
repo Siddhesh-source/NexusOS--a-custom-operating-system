@@ -125,6 +125,10 @@ __attribute__((noinline)) static void run_fault_demo(void)
     debug_demo_panic();
 #elif defined(BHARAT_FAULT_DEMO_SMASH)
     debug_demo_stack_smash();
+#elif defined(BHARAT_FAULT_DEMO_UAF)
+    debug_demo_use_after_free();
+#elif defined(BHARAT_FAULT_DEMO_OVERFLOW)
+    debug_demo_heap_overflow();
 #endif
 }
 

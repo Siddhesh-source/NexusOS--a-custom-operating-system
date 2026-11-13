@@ -141,7 +141,7 @@ def object_for(src: Path) -> Path:
 
 # Opt-in fatal exception demos (see run_fault_demo() in kernel.c).
 FAULT_DEMOS = ["pf", "null", "stack", "de", "ud", "df", "ctx", "tstack",
-               "panic", "smash"]
+               "panic", "smash", "uaf", "overflow"]
 
 
 def build_kernel(fault_demo: str | None = None) -> Path:
