@@ -1,5 +1,10 @@
 # BharatOS: Updates to the Plan (read this before ROADMAP, HLD and LLD)
 
+> **Current priority (2026-11-14): V1, a demo-ready OS.** Phases 10–11 build
+> it (input, files, login, terminal, graphical desktop, demo); Phase 12
+> hardens it. The old Phases 10–20 follow as Phases 13–23, unchanged in
+> content. See §7 and `WAY_AHEAD.md`.
+
 This file records the decisions made after the first plan was written.
 **Where this file and `ROADMAP.md`, `design/HLD.md` or `design/LLD.md`
 disagree, this file wins.** Those documents are still useful for the
@@ -14,7 +19,7 @@ Contents:
 4. What makes BharatOS stand out (user-facing and engineering)
 5. The new architecture
 6. Upgrades that make it a serious OS
-7. New phase plan (Phases 6–20)
+7. New phase plan (Phases 6–23; V1 first)
 8. Key designs (low-level detail for the new parts)
 9. How we build and test
 10. Decision log
@@ -247,18 +252,25 @@ boot, bad-input tests, a one-minute demo, and docs. **New rules:**
 | 7 | Modern hardware ✅ done | serious OS | L |
 | 8 | Memory that scales ✅ done | serious OS | L |
 | 9 | Multi-core ✅ done | concurrency | L |
-| 10 | User mode, handles and async rings | security, performance | L |
-| 11 | Microkernel IPC and services | architecture | L |
-| 12 | Shell, self-check and explain | USP 1, 2 | M |
-| 13 | Drivers as services | architecture | L |
-| 14 | BharatFS: crash-safe, versions, transactions | USP 3, storage, testing | XL |
-| 15 | Permissions and verified boot | USP 1, 4, security | M |
-| 16 | Networking (Rust TCP/IP) | networking | L |
-| 17 | Resume, replay and live migration | USP 3, distributed, debugging | XL |
-| 18 | Desktop and WebAssembly apps | all USPs visible | L |
-| 19 | Made for Bharat and real hardware | USP 5 | L |
-| 20 | Standout extras: Raft folders, safe tracing programs | distributed, observability | L |
+| **10** | **V1 core: input, files, login, terminal** | demo | M |
+| **11** | **V1 desktop and demo** | demo, all USPs visible | M |
+| **12** | **V1 hardening: thorough tests, fixes, polish** | quality | M |
+| 13 (was 10) | User mode, handles and async rings | security, performance | L |
+| 14 (was 11) | Microkernel IPC and services | architecture | L |
+| 15 (was 12) | Self-check and explain (`why`); shell moves to user mode | USP 1, 2 | M |
+| 16 (was 13) | Drivers as services | architecture | L |
+| 17 (was 14) | BharatFS: crash-safe, versions, transactions (replaces ramfs) | USP 3, storage, testing | XL |
+| 18 (was 15) | Permissions and verified boot | USP 1, 4, security | M |
+| 19 (was 16) | Networking (Rust TCP/IP) | networking | L |
+| 20 (was 17) | Resume, replay and live migration | USP 3, distributed, debugging | XL |
+| 21 (was 18) | Desktop polish and WebAssembly apps (builds on the V1 desktop) | all USPs visible | L |
+| 22 (was 19) | Made for Bharat and real hardware | USP 5 | L |
+| 23 (was 20) | Standout extras: Raft folders, safe tracing programs | distributed, observability | L |
 | later | RISC-V port, self-hosting | portability | XL |
+
+**Numbering note:** Phases 13–23 keep "(was N)" in their headings. Older
+text elsewhere in this file, in the decision log and in other documents
+may still say "Phase 10" etc. for those; read it as the old number.
 
 ### Phase 6: Debug and hardening foundation
 **Status: ✅ done.** All nine steps are built and tested; see
@@ -354,7 +366,111 @@ is caught; 1M-operation stress on 4 CPUs finds no lost updates; context
 switches scale per CPU (bench).
 **Demo:** a 4-CPU live dashboard; the lock checker catching an inversion.
 
-### Phase 10: User mode, handles and async rings
+### Current priority: V1, a demo-ready OS (Phases 10–12)
+
+**Why the order changed (2026-11-14).** The kernel core (Phases 1–9) is
+solid, but nothing yet shows it off. The priority now is a **V1 that can
+be demonstrated end to end in a few minutes**: boot, log in with your
+name, a graphical desktop with a terminal and a file manager, and the
+engineering (multi-core, self-checks, crash reports, lock checker) visible
+on screen. V1 is built in **two quick phases (10, 11)**, then **hardened
+in Phase 12**. Everything from the old Phases 10–20 is kept, unchanged in
+content, and moved after V1 (now Phases 13–23; each keeps "was N" in its
+heading). Nothing was deleted.
+
+**V1 rules (simple engineering, quick):**
+- V1 apps (login, shell, file manager, monitor) run as **kernel threads**
+  calling kernel functions directly. User mode, handles and rings come in
+  Phase 13; the apps move there later. Keep each app behind a small API
+  (`fs_*`, `ui_*`, `input_*`) so the move is mechanical.
+- **Files live in RAM** (ramfs), seeded at boot from a small read-only
+  bundle (a Limine module). Saving to disk comes with BharatFS (Phase 17).
+- **One font, one theme**, from `docs/design/UI.md`; no animations beyond
+  a moving cursor and redraws.
+- Every V1 feature still gets boot self-tests (headless) and a line in its
+  phase doc; thorough testing is Phase 12's job.
+- Kernel size budget rises to 16,000 lines for V1 (set in Phase 10).
+
+| Phase | Name | Size |
+|---|---|---|
+| 10 | **V1 core: input, files, login, terminal** | M |
+| 11 | **V1 desktop and demo** | M |
+| 12 | **V1 hardening: thorough tests, fixes, polish** | M |
+| 13–23 | the old Phases 10–20, same content, in the same order | — |
+
+### Phase 10: V1 core: input, files, login, terminal
+**Goal:** everything the desktop needs underneath, usable from a text
+terminal on the screen console.
+1. **Keyboard:** PS/2 keyboard driver on IRQ 1 through the I/O APIC
+   (scancode set 1 → key events with shift/ctrl/caps), an input event
+   queue that threads can wait on (sleep until a key arrives).
+2. **Mouse:** PS/2 mouse on IRQ 12 (3-byte packets → x/y/buttons events in
+   the same queue).
+3. **ramfs:** a tree of directories and files in kernel memory (slab for
+   nodes, heap for data), API `fs_open/read/write/create/mkdir/unlink/
+   list/stat`, path lookup, size limits checked. Seeded at boot from a
+   read-only tar bundle loaded as a Limine module (`/home`, `/etc/motd`,
+   sample files). Lock: one named spinlock (or a sleeping lock if needed).
+4. **Login:** a boot screen asking for a user name (and optional simple
+   password from `/etc/users`); the name is shown in the prompt and later
+   on the desktop. Not a security boundary yet (Phase 18 does that).
+5. **Shell (terminal):** line editor (backspace, history with arrows), and
+   commands: `help ls cd pwd cat echo > mkdir rm touch clear whoami
+   uptime mem cpus ps top kill run checks lockdemo crashdemo about
+   reboot`. `checks` reruns a set of self-tests and prints a summary;
+   `cpus/top` show the per-CPU dashboard; `crashdemo` runs a thread that
+   faults and shows the report without killing the OS where possible.
+**Done when:** headless boot tests create, write, read, list and delete
+files (including bad paths and full-size limits); the shell runs a
+scripted command list in a self-test and checks its output; a key typed
+in QEMU appears at the prompt (manual check, documented); all earlier
+tests still pass on `--smp 1` and `--smp 4`.
+**Demo:** boot, type your name, `ls`, `cat /etc/motd`, `echo hi > a.txt`,
+`cat a.txt`, `cpus`, `checks`.
+
+### Phase 11: V1 desktop and demo
+**Goal:** the visual V1: what you show at the end of the day.
+1. **Graphics base:** double-buffered framebuffer drawing (rects, text,
+   icons from small bitmaps), damage-rectangle redraws, mouse cursor.
+2. **Window manager:** windows with title bars, focus, move by dragging,
+   close; a taskbar with the user name, CPU count, clock and app buttons.
+3. **Apps:** Terminal (the Phase 10 shell in a window), Files (browse,
+   open a text file, new file/folder, delete), System Monitor (live
+   per-CPU load, threads, memory, IPIs: the Phase 9 dashboard as a
+   window), Health (self-check results, lock-checker demo, last crash
+   report), Text viewer/editor (simple), About (versions, engineering
+   facts).
+4. **Login screen and boot splash** in graphics: logo, progress line from
+   the real boot steps, then the login box, then the desktop.
+5. **Demo mode:** `python build.py demo` boots QEMU with a window and an
+   optional scripted tour (`--auto`: opens each app, types commands,
+   shows the monitor under load, runs the lock-order demo) so the demo
+   works hands-free.
+**Done when:** headless boot tests drive the window manager and apps
+through their APIs (open/close/focus, file manager actions, terminal
+command output in a window buffer); a QEMU screenshot of the desktop is
+captured by a test (`screendump`) and checked to be non-empty; the scripted
+demo runs start to finish on `--smp 4`.
+**Demo:** boot splash → login with your name → desktop → Terminal →
+Files → System Monitor under load on 4 CPUs → Health with checks and the
+lock-order demo. About 3 minutes.
+
+### Phase 12: V1 hardening: thorough tests, fixes, polish
+**Goal:** make V1 solid before new big features.
+1. Host unit tests for ramfs, path parsing, line editor, window geometry
+   and input decoding (millions of random cases, like the allocator
+   tests).
+2. Fuzz the shell and ramfs with random command/operation sequences in a
+   boot test; bad input never crashes the kernel.
+3. Screenshot comparison tests for the main screens; boot-time budget
+   for the graphical boot.
+4. Leftovers from V1 and Phase 9's known limits that hurt the demo
+   (shootdown batching, reaping on every CPU, device IRQs spread).
+5. Real-hardware boot check from a USB stick (UEFI) and a written report.
+**Done when:** all V1 tests and fuzzing pass on `--smp 1/2/4`, BIOS and
+UEFI; the bug journal and docs are up to date; a recorded demo video.
+
+### Phase 13 (was 10): User mode, handles and async rings
 1. GDT user segments (order from LLD Phase 6), `TSS.rsp0`, FPU save
    (`fxsave`/`xsave`), ring-3 entry.
 2. **SMEP/SMAP on**; `copy_from_user`/`copy_to_user` use `stac`/`clac`.
@@ -374,7 +490,7 @@ single calls.
 **Demo:** two isolated user programs doing batched I/O; a crash is
 contained.
 
-### Phase 11: Microkernel IPC and services
+### Phase 14 (was 11): Microkernel IPC and services
 1. Channels: messages of up to 4 KiB plus up to 4 handles; zero-copy
    shared memory objects (§8.3).
 2. Message definition files (`*.idl`) and a Python generator for C and
@@ -394,7 +510,7 @@ typing continues; malformed messages are rejected; IPC round-trip time is
 benchmarked; the Rust service and C client talk through generated stubs.
 **Demo:** kill a driver; the OS keeps running; it comes back.
 
-### Phase 12: Shell, self-check and explain (USP 1, 2)
+### Phase 15 (was 12): Shell, self-check and explain (USP 1, 2)
 Old Phase 7 and old Phase 8 combined, on top of services:
 1. `bsh` shell: `help`, `ls`, `run`, `ps`, `mem`, `kill`, `uptime`,
    `health`, `why`, `trace`.
@@ -409,7 +525,7 @@ Old Phase 7 and old Phase 8 combined, on top of services:
 **Done when:** the old Phase 7 and 8 "done when" lists pass; going over a
 budget is reported and enforced.
 
-### Phase 13: Drivers as services
+### Phase 16 (was 13): Drivers as services
 1. Driver model: the kernel hands each driver service a device handle
    (PCI config access), memory-mapped I/O region handles, an interrupt
    handle, and DMA memory handles with known physical addresses.
@@ -422,7 +538,7 @@ budget is reported and enforced.
 driver mid-I/O makes the request fail cleanly or retry after restart,
 with no corruption.
 
-### Phase 14: BharatFS, crash-safe, versions and transactions (USP 3)
+### Phase 17 (was 14): BharatFS, crash-safe, versions and transactions (USP 3)
 1. BharatFS as a Rust service (on-disk design from old LLD Phase 9:
    copy-on-write, two root slots, checksums).
 2. Versions: `history`, `undo`, `rewind` (old plan).
@@ -442,7 +558,7 @@ simulated power cuts produce zero inconsistencies, and a transaction is
 all-or-nothing under a power cut.
 **Demo:** kill the VM mid-save; reboot; last good version; undo an install.
 
-### Phase 15: Permissions and verified boot (USP 1, 4)
+### Phase 18 (was 15): Permissions and verified boot (USP 1, 4)
 1. Permission service: app manifests, ask-first prompts, saved answers.
    Handles are only given out after approval (old Phase 10, using handles
    in place of the `caps` list).
@@ -455,7 +571,7 @@ all-or-nothing under a power cut.
 **Done when:** the old Phase 10 tests pass; a tampered image is refused; a
 failing update rolls back automatically.
 
-### Phase 16: Networking
+### Phase 19 (was 16): Networking
 1. TCP/IP stack in Rust as a service: Ethernet, ARP, IPv4, ICMP, UDP,
    DHCP, DNS, TCP (connection handshake, retransmission, flow control,
    basic congestion control).
@@ -466,7 +582,7 @@ failing update rolls back automatically.
 **Done when:** an HTTP GET works from BharatOS; TCP survives 5% packet
 loss; throughput and latency are benchmarked against Linux on the same VM.
 
-### Phase 17: Resume, replay and live migration (USP 3, showcase)
+### Phase 20 (was 17): Resume, replay and live migration (USP 3, showcase)
 1. **Checkpoint:** every few seconds, save each program's changed pages
    (via copy-on-write), thread registers and handle table to BharatFS.
    Device handles are re-acquired by name on restore.
@@ -484,7 +600,7 @@ recorded crash replays to the same instruction 100/100 times; a running
 program moves between two QEMU machines and keeps its state.
 **Demo:** move a running game or counter from machine A to machine B.
 
-### Phase 18: Desktop and WebAssembly apps
+### Phase 21 (was 18): Desktop and WebAssembly apps
 1. Desktop/compositor service on virtio-gpu or the framebuffer (look and
    screens from `design/UI.md`).
 2. Built-in apps: Home, Terminal, Files (History/Undo), System (Why?),
@@ -493,14 +609,14 @@ program moves between two QEMU machines and keeps its state.
    get WASI-style handles only, and run unchanged on any CPU.
 4. Screenshot tests (old Phase 11).
 
-### Phase 19: Made for Bharat and real hardware (USP 5)
+### Phase 22 (was 19): Made for Bharat and real hardware (USP 5)
 1. Language packs and build-time Devanagari rendering (old Phase 12).
 2. Compressed memory; boot and run within 128 MB (CI test).
 3. **NVMe** and **xHCI + USB HID** drivers (needed on modern real PCs).
 4. Boot on at least one real BIOS PC and one UEFI PC; documented with
    photos.
 
-### Phase 20: Standout extras
+### Phase 23 (was 20): Standout extras
 1. **Raft-replicated folders:** a folder kept identical across 3
    machines; survives one machine failing; leader election and log
    replication tested in simulation with network partitions.
@@ -743,6 +859,8 @@ operation, ring batch of 64, IPC round trip, page fault, 4 KiB file read
 | D24 | `smp_call` waiters keep answering requests in every spin loop; RCU acks only from the interrupt | TLB shootdowns can be sent while holding locks without deadlock; one IPI round gives an RCU grace period | forbid shootdowns under locks (big restructuring); counter-based RCU | shootdown cost shows up in profiles (batch them) |
 | D25 | RCU readers = interrupts off; grace period = one IPI answered by every other CPU | no preemption counter needed; reuses the shootdown mailbox | callback-based RCU with batching | frees under RCU become frequent |
 | D26 | Work stealing by idle CPUs (try-lock), placement on the least-loaded CPU, idle CPUs woken by IPI in rotation | simple, no periodic balancer tick (stays tickless) | periodic load balancer | priorities or NUMA arrive |
+| D28 | V1 first: a demo-ready OS (input, ramfs, login, shell, desktop) before user mode, IPC and BharatFS; V1 apps run as kernel threads behind small APIs | something to show end to end now; the kernel core is solid enough; the APIs keep the later move to user mode mechanical | finish the microkernel first (months without a visible result) | V1 is hardened (Phase 12) |
+| D29 | ramfs seeded from a read-only boot bundle for V1 | files work at once with no disk driver | ATA driver now (thrown away later) | BharatFS (Phase 17) |
 | D27 | Boot tests run QEMU's CPUs on one host thread (`thread=single`) | results do not depend on how busy the host is; parallel runs remain a manual stress and the bench mode | `thread=multi` in every test (flaky timing checks) | CI gets KVM |
 | D22 | Keep the buddy allocator even though a next-fit bitmap is faster for single pages (16 vs 37 cycles natively) | contiguous blocks, per-page reference counts for COW, steady under fragmentation; a 64-page hot cache covers the common case | keep the bitmap | single-page allocation shows up in profiles (per-CPU caches; not needed in Phase 9: the page allocator is not on the switch path, revisit with user processes) |
 
@@ -841,6 +959,12 @@ appears (D14).
 ---
 
 ## 14. Old plan to new plan mapping
+
+**V1 reorder (2026-11-14):** new Phases 10–12 (V1 core, V1 desktop and
+demo, V1 hardening) were inserted; the phases below that said 10–20 are
+now 13–23. The shell and desktop arrive early in simple kernel-thread form
+(V1) and are moved into user mode / extended in Phases 15 and 21.
+
 
 | Old (ROADMAP.md) | New |
 |---|---|
