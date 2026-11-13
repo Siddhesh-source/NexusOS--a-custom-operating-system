@@ -16,4 +16,8 @@ void serial_puts(const char *s);
 void serial_write(const char *buf, uint64_t n);
 void serial_put_hex(uint64_t value);
 
+/* Send a copy of every byte written to the serial port to `fn` as well
+ * (used by the screen console). NULL turns it off. */
+void serial_set_mirror(void (*fn)(char c));
+
 #endif

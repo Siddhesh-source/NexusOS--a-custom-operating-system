@@ -14,6 +14,10 @@
 #include "sched_test.h"
 #include "debug_test.h"
 #include "bench.h"
+#include "fbcon.h"
+#include "acpi.h"
+#include "pci.h"
+#include "hw_test.h"
 #include "kprintf.h"
 #include "cpu.h"
 
@@ -50,6 +54,11 @@ volatile struct limine_bootloader_info_request bootloader_info_request = {
 __attribute__((used, section(".limine_reqs")))
 volatile struct limine_memmap_request memmap_request = {
     .id = LIMINE_MEMMAP_REQUEST_ID, .revision = 0,
+};
+
+__attribute__((used, section(".limine_reqs")))
+volatile struct limine_rsdp_request rsdp_request = {
+    .id = LIMINE_RSDP_REQUEST_ID, .revision = 0,
 };
 
 __attribute__((used, section(".limine_reqs_end")))
@@ -133,9 +142,23 @@ __attribute__((noinline)) static void run_fault_demo(void)
 #endif
 }
 
+/* Mirror the console to the screen, if the bootloader set up a
+ * framebuffer we can draw on. */
+static void start_screen_console(void)
+{
+    struct limine_framebuffer_response *r = framebuffer_request.response;
+    if (r == NULL || r->framebuffer_count == 0)
+        return;
+    struct limine_framebuffer *f = r->framebuffers[0];
+    if (!fbcon_init(f->address, f->width, f->height, f->pitch, f->bpp,
+                    f->red_mask_shift, f->green_mask_shift, f->blue_mask_shift))
+        serial_puts("[fbcon] framebuffer format not supported; serial only\n");
+}
+
 void kernel_main(void)
 {
     serial_init();
+    start_screen_console();
 
     serial_puts("\n============================================\n");
     serial_puts("           B H A R A T   O S\n");
@@ -192,6 +215,11 @@ void kernel_main(void)
     collect_boot_mem_info(&mem_info);
     mm_init(&mem_info);
 
+    /* Phase 7: discover the hardware (needs the memory manager to map
+     * firmware tables and device registers). */
+    acpi_init(rsdp_request.response != NULL ? (uint64_t)rsdp_request.response->address : 0);
+    pci_init();
+
     bool mm_ok = mm_run_tests();
 
     /* Phase 4: processes, threads, context switching */
@@ -210,6 +238,9 @@ void kernel_main(void)
      * this only checks them. */
     bool debug_ok = debug_run_tests();
 
+    /* Phase 7: modern hardware (ACPI, PCI, screen console, APIC timer). */
+    bool hw_ok = hw_run_tests();
+
     serial_puts("\n[ok] Kernel started successfully.\n");
     if (mm_ok)
         serial_puts("[ok] Phase 3 memory management verified.\n");
@@ -227,6 +258,10 @@ void kernel_main(void)
         serial_puts("[ok] Phase 6 debug and hardening verified.\n");
     else
         serial_puts("[FAIL] Phase 6 debug tests reported failures.\n");
+    if (hw_ok)
+        serial_puts("[ok] Phase 7 modern hardware verified.\n");
+    else
+        serial_puts("[FAIL] Phase 7 hardware tests reported failures.\n");
 
     bench_run();          /* only does something in the bench build */
     run_fault_demo();

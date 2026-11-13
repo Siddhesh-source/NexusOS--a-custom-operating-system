@@ -19,6 +19,7 @@ REQUIRED = [
     "[ok] Phase 4 process management verified.",
     "[ok] Phase 5 scheduler verified.",
     "[ok] Phase 6 debug and hardening verified.",
+    "[ok] Phase 7 modern hardware verified.",
 ]
 
 # Any of these means the boot went wrong, even if the markers above appear.
@@ -173,7 +174,8 @@ def run_fault_demo_test(image: Path, demo: str, timeout: int = 120) -> int:
     expect = FAULT_DEMO_EXPECT[demo] + ["[ok] Phase 3 memory management verified.",
                                         "[ok] Phase 4 process management verified.",
                                         "[ok] Phase 5 scheduler verified.",
-                                        "[ok] Phase 6 debug and hardening verified."]
+                                        "[ok] Phase 6 debug and hardening verified.",
+                                        "[ok] Phase 7 modern hardware verified."]
     forbidden = [m for m in ["KERNEL PANIC", "[FAIL]"]
                  if m not in FAULT_DEMO_ALLOW.get(demo, [])]
     success, full, _ = boot_and_watch(image, expect, forbidden, timeout)

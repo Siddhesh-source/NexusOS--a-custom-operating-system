@@ -451,6 +451,22 @@ void vmm_init(const struct boot_mem_info *info)
 
 /* ---- diagnostics ------------------------------------------------------- */
 
+void *vmm_map_phys(uint64_t phys, uint64_t size, uint32_t flags)
+{
+    if (size == 0 || phys + size < phys || phys + size > MAX_PHYS_ADDR)
+        return NULL;
+    uint64_t end = PAGE_ALIGN_UP(phys + size);
+    for (uint64_t p = PAGE_ALIGN_DOWN(phys); p < end; p += PAGE_SIZE) {
+        vmm_status_t st = vmm_map_page(&kernel_space, p + hhdm_offset, p,
+                                       (flags & ~VMM_EXEC) | VMM_GLOBAL);
+        if (st != VMM_OK && st != VMM_ERR_ALREADY_MAPPED) {
+            kprintf("[vmm] cannot map phys %p: %s\n", (void *)p, vmm_status_str(st));
+            return NULL;
+        }
+    }
+    return phys_to_virt(phys);
+}
+
 const char *vmm_describe_address(uint64_t virt)
 {
     if (!vmm_is_canonical(virt))

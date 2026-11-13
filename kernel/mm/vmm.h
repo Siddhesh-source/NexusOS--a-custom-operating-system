@@ -63,6 +63,13 @@ vmm_status_t vmm_map_range(address_space_t *as, uint64_t virt, uint64_t phys,
  * so later map calls in that range cannot fail for lack of page tables. */
 vmm_status_t vmm_reserve_tables(address_space_t *as, uint64_t virt, uint64_t size);
 
+/* Make physical memory outside RAM (firmware tables, device registers)
+ * reachable through the direct map: maps every page of [phys, phys+size)
+ * at phys + hhdm_offset if it is not mapped yet. VMM_NOCACHE in `flags` is
+ * required for device registers. Returns the virtual address of `phys`,
+ * or NULL if a mapping failed. */
+void *vmm_map_phys(uint64_t phys, uint64_t size, uint32_t flags);
+
 /* Create an address space: empty user half, shared kernel half. */
 vmm_status_t vmm_create_address_space(address_space_t *out);
 
