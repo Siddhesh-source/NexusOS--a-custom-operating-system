@@ -273,10 +273,9 @@ can run.
   - Values are snapshotted in one critical section, so the table is
     consistent.
   - It refreshes every 50 ticks.
-- **Tracing:** `sched_set_trace(n)` logs the next *n* switches as
-  `[SCHED] tick=… current=… next=… reason=… switch_count=…`, then turns
-  itself off. The demo traces 6 switches; tracing every tick would distort
-  timing.
+- **Tracing:** every switch is recorded in the kernel event trace (since
+  Phase 6, `kernel/trace/trace.c`; it replaced the old `sched_set_trace`
+  printing). The demo prints the latest 6 events after its first frame.
 
 ## Testing
 

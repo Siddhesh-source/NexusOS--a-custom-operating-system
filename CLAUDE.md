@@ -33,13 +33,17 @@ python scripts/fetch_limine.py      # once: download the bootloader into tools/
 python build.py                     # build kernel + disk image (build/bharat.img)
 python build.py run                 # boot in QEMU (BIOS), serial in terminal; quit: Ctrl+A then X
 python build.py run-uefi            # boot through UEFI firmware
-python build.py test                # build + boot + check all self-tests (exit 0 = pass)
-python build.py test-faults         # build 8 crash-on-purpose kernels, check each report
+python build.py test                # build + boot + check all self-tests and budgets (exit 0 = pass)
+python build.py test-faults         # build 12 crash-on-purpose kernels, check each report
+python build.py unit                # host unit tests: heap and scheduler code, millions of cases
+python build.py bench               # benchmarks -> appends a row to docs/benchmarks.md
+python build.py debug               # QEMU paused for GDB on :1234; then: gdb -x scripts/bharat.gdb
 python build.py clean
 ```
 
 Run `python build.py test` after **every** change. Run `test-faults` after
-touching interrupts, memory, stacks or context switching. On Windows, tool
+touching interrupts, memory, stacks or context switching, and `unit` after
+touching the heap, scheduler, trace or kprintf. On Windows, tool
 paths come from `.env` (`BHARAT_CLANG`, `BHARAT_NASM`, `BHARAT_QEMU`, ...;
 see `.env.example`).
 
@@ -47,7 +51,9 @@ see `.env.example`).
 
 ```text
 build.py                 the only build entry point (build/run/test)
-scripts/                 fat32.py (disk image), test_boot.py (QEMU test harness), fetch_limine.py
+scripts/                 fat32.py (disk image), test_boot.py (QEMU test harness), fetch_limine.py,
+                         ksyms.py (symbol table), budgets.py (size/boot-time limits), bharat.gdb
+.github/workflows/       CI: one quick job (unit tests + one BIOS boot test)
 boot/limine.conf         boot menu
 kernel/
   arch/x86_64/           CPU-specific: entry.asm, linker.ld, GDT/TSS, IDT, interrupts, PIT/PIC timer, context switch
@@ -57,9 +63,11 @@ kernel/
   sched/                 scheduler
   drivers/               device drivers (serial today)
   lib/                   kprintf, string, box drawing
+  trace/                 call traces (backtrace.c + generated symbol table), event trace ring
   include/               third-party headers (limine.h)
-  tests/                 boot-time self-tests and their assembly probes
-user/                    (Phase 6+) user programs, user library, apps
+  tests/                 boot-time self-tests, their assembly probes, benchmarks (bench.c)
+tests/unit/              host-side unit tests (freestanding, no libc; fakes in fakes/)
+user/                    (Phase 10+) user programs, user library, apps
 docs/                    overview, roadmap, design/, phases/, logs/
 ```
 

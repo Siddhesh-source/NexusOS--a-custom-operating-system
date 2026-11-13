@@ -6,6 +6,7 @@
 #include "cpu.h"
 #include "box.h"
 #include "kprintf.h"
+#include "trace.h"
 
 /* sched_spin.asm */
 uint64_t preempt_reg_spin(uint64_t seed, volatile uint64_t *stop, volatile uint64_t *iterations);
@@ -722,13 +723,13 @@ static void run_demo(void)
         }
     }
 
-    kprintf("[demo] Tracing the first scheduling decisions (rate-limited):\n");
-    sched_set_trace(6);
     const unsigned frames = 4;
     for (unsigned f = 1; f <= frames; f++) {
         sched_sleep(50);             /* workers run, preempting each other */
-        if (f == 1)
-            sched_set_trace(0);
+        if (f == 1) {
+            kprintf("[demo] Latest scheduling decisions from the event trace:\n");
+            trace_dump(6);
+        }
         kprintf("\n");
         dashboard(f, frames);
     }

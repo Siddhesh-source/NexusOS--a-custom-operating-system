@@ -18,6 +18,7 @@ REQUIRED = [
     "[ok] Phase 3 memory management verified.",
     "[ok] Phase 4 process management verified.",
     "[ok] Phase 5 scheduler verified.",
+    "[ok] Phase 6 debug and hardening verified.",
 ]
 
 # Any of these means the boot went wrong, even if the markers above appear.
@@ -45,10 +46,27 @@ FAULT_DEMO_EXPECT = {
     # #PF cannot be delivered on that stack, so the CPU raises #DF on IST1.
     "tstack": ["[demo] Thread TID", "[exception] Double fault (#DF)",
                "cr2=0xffffe00000"],
+    # A panic prints a call trace with function names, innermost first,
+    # then the latest events from the trace ring.
+    "panic": ["PANIC: forced panic to show a call trace", "Call trace",
+              "demo_panic_inner+0x", "debug_demo_panic+0x", "kernel_main+0x",
+              "Recent events"],
+    # The overflow overwrites only the canary; the check catches it before
+    # the function returns, and the trace names the guilty function.
+    "smash": ["PANIC: stack smashing detected", "Call trace",
+              "stack_smash_victim+0x", "debug_demo_stack_smash+0x"],
+    # Heap poisoning: the next allocation of the damaged memory panics;
+    # kfree checks the red zone after a block.
+    "uaf": ["freed memory at", "PANIC: heap: use after free detected",
+            "kmalloc", "debug_demo_use_after_free+0x"],
+    "overflow": ["allocation", "of 20 bytes", "PANIC: heap: overflow detected",
+                 "kfree+0x", "debug_demo_heap_overflow+0x"],
 }
 
 # Demos whose expected output legitimately contains a normally-forbidden marker.
-FAULT_DEMO_ALLOW = {"ctx": ["KERNEL PANIC"]}
+FAULT_DEMO_ALLOW = {"ctx": ["KERNEL PANIC"], "panic": ["KERNEL PANIC"],
+                    "smash": ["KERNEL PANIC"], "uaf": ["KERNEL PANIC"],
+                    "overflow": ["KERNEL PANIC"]}
 
 
 def find_qemu() -> str:
@@ -69,12 +87,13 @@ def cmd_for(image: Path) -> List[str]:
 
 
 def boot_and_watch(image: Path, required: List[str], forbidden: List[str],
-                   timeout: int) -> tuple[bool, str]:
+                   timeout: int) -> tuple[bool, str, float]:
     """Boot `image` until every `required` marker is seen (success), a
-    `forbidden` marker appears, or `timeout` seconds pass."""
+    `forbidden` marker appears, or `timeout` seconds pass. Also returns the
+    seconds from starting QEMU to the end of the watch."""
     cmd = cmd_for(image)
     if not cmd:
-        return False, ""
+        return False, "", 0.0
     print(f"[TEST] {' '.join(cmd)}")
     # The kernel emits UTF-8 (box-drawing glyphs); don't let the platform
     # default codec (cp1252 on Windows) decode or re-encode it.
@@ -95,7 +114,8 @@ def boot_and_watch(image: Path, required: List[str], forbidden: List[str],
     threading.Thread(target=reader, daemon=True).start()
 
     lines: List[str] = []
-    deadline = time.time() + timeout
+    started = time.time()
+    deadline = started + timeout
     success = False
     failed = False
     try:
@@ -123,17 +143,21 @@ def boot_and_watch(image: Path, required: List[str], forbidden: List[str],
                 p.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 p.kill()
-    return success, "\n".join(lines)
+    return success, "\n".join(lines), time.time() - started
 
 
 def run_boot_test(image: Path, timeout: int = 120) -> int:
-    success, full = boot_and_watch(image, REQUIRED, FORBIDDEN, timeout)
+    success, full, seconds = boot_and_watch(image, REQUIRED, FORBIDDEN, timeout)
     print("=" * 60)
     if success:
+        from budgets import check_budgets
+        if not check_budgets(seconds):
+            return 1
         print("[PASS] BharatOS booted successfully.")
         print("[PASS] Phase 3 memory-management tests passed.")
         print("[PASS] Phase 4 process/thread tests passed.")
         print("[PASS] Phase 5 scheduler tests passed.")
+        print("[PASS] Phase 6 debug and hardening tests passed.")
         return 0
     print("[FAIL] Boot did not complete cleanly.")
     for m in FORBIDDEN:
@@ -148,10 +172,11 @@ def run_boot_test(image: Path, timeout: int = 120) -> int:
 def run_fault_demo_test(image: Path, demo: str, timeout: int = 120) -> int:
     expect = FAULT_DEMO_EXPECT[demo] + ["[ok] Phase 3 memory management verified.",
                                         "[ok] Phase 4 process management verified.",
-                                        "[ok] Phase 5 scheduler verified."]
+                                        "[ok] Phase 5 scheduler verified.",
+                                        "[ok] Phase 6 debug and hardening verified."]
     forbidden = [m for m in ["KERNEL PANIC", "[FAIL]"]
                  if m not in FAULT_DEMO_ALLOW.get(demo, [])]
-    success, full = boot_and_watch(image, expect, forbidden, timeout)
+    success, full, _ = boot_and_watch(image, expect, forbidden, timeout)
     if success:
         print(f"[PASS] fault demo '{demo}' reported as expected.")
         return 0

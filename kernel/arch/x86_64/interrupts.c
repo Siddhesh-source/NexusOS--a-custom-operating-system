@@ -4,6 +4,8 @@
 #include "cpu.h"
 #include "timer.h"
 #include "pagefault.h"
+#include "backtrace.h"
+#include "trace.h"
 
 static const char *const exception_names[32] = {
     "Divide-by-zero (#DE)",           "Debug (#DB)",
@@ -49,6 +51,10 @@ void exception_fatal(const struct interrupt_frame *f, const char *reason)
         kprintf("[exception] %s\n", reason);
     kprintf("[exception] Saved registers:\n");
     interrupt_dump_frame(f);
+    /* Start at the faulting instruction, then walk the interrupted code's
+     * frames (the interrupt stubs keep RBP untouched). */
+    backtrace_print(f->rip, f->rbp);
+    trace_dump(TRACE_DUMP_ON_CRASH);
     kprintf("[exception] Halting...\n");
     halt_forever();
 }

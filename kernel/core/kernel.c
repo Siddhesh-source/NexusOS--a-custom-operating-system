@@ -12,6 +12,8 @@
 #include "proc_test.h"
 #include "sched.h"
 #include "sched_test.h"
+#include "debug_test.h"
+#include "bench.h"
 #include "kprintf.h"
 #include "cpu.h"
 
@@ -96,7 +98,7 @@ static void collect_boot_mem_info(struct boot_mem_info *info)
 
 /* Opt-in fatal exception demos, selected at build time with
  * `python build.py run --fault-demo <name>`. Each one halts the kernel. */
-static void run_fault_demo(void)
+__attribute__((noinline)) static void run_fault_demo(void)
 {
 #if defined(BHARAT_FAULT_DEMO_PF)
     kprintf("\n[demo] Writing to unmapped kernel address %p...\n", (void *)(MM_TEST_VBASE + 0xdead000));
@@ -120,6 +122,14 @@ static void run_fault_demo(void)
     proc_demo_corrupt_context();
 #elif defined(BHARAT_FAULT_DEMO_TSTACK)
     proc_demo_thread_stack_overflow();
+#elif defined(BHARAT_FAULT_DEMO_PANIC)
+    debug_demo_panic();
+#elif defined(BHARAT_FAULT_DEMO_SMASH)
+    debug_demo_stack_smash();
+#elif defined(BHARAT_FAULT_DEMO_UAF)
+    debug_demo_use_after_free();
+#elif defined(BHARAT_FAULT_DEMO_OVERFLOW)
+    debug_demo_heap_overflow();
 #endif
 }
 
@@ -129,7 +139,7 @@ void kernel_main(void)
 
     serial_puts("\n============================================\n");
     serial_puts("           B H A R A T   O S\n");
-    serial_puts("     Phase 5: Preemptive Scheduler\n");
+    serial_puts("   Phase 6: Debug and Hardening Tools\n");
     serial_puts("============================================\n\n");
 
     serial_puts("[boot] CPU entered long mode (64-bit).\n");
@@ -196,6 +206,10 @@ void kernel_main(void)
     sched_start();
     bool sched_ok = sched_run_tests();
 
+    /* Phase 6: debugging and hardening tools. They are active from boot;
+     * this only checks them. */
+    bool debug_ok = debug_run_tests();
+
     serial_puts("\n[ok] Kernel started successfully.\n");
     if (mm_ok)
         serial_puts("[ok] Phase 3 memory management verified.\n");
@@ -209,7 +223,12 @@ void kernel_main(void)
         serial_puts("[ok] Phase 5 scheduler verified.\n");
     else
         serial_puts("[FAIL] Phase 5 scheduler tests reported failures.\n");
+    if (debug_ok)
+        serial_puts("[ok] Phase 6 debug and hardening verified.\n");
+    else
+        serial_puts("[FAIL] Phase 6 debug tests reported failures.\n");
 
+    bench_run();          /* only does something in the bench build */
     run_fault_demo();
 
     /* Heartbeat: a dot per second. kmain sleeps in between, so the idle

@@ -32,8 +32,14 @@
 #define IS_PAGE_ALIGNED(x)  (((uint64_t)(x) & PAGE_MASK) == 0)
 
 #define KERNEL_HALF_BASE    ((uint64_t)0xffff800000000000)
+/* The heap range can be overridden so host unit tests (tests/unit) can run
+ * heap.c over an ordinary array. The kernel never overrides it. */
+#ifndef KERNEL_HEAP_BASE
 #define KERNEL_HEAP_BASE    ((uint64_t)0xffffc00000000000)
+#endif
+#ifndef KERNEL_HEAP_MAX
 #define KERNEL_HEAP_MAX     ((uint64_t)256 << 20)         /* 256 MiB of address space */
+#endif
 #define MM_TEST_VBASE       ((uint64_t)0xffffd00000000000)
 #define KSTACK_REGION_BASE  ((uint64_t)0xffffe00000000000)
 

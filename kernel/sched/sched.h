@@ -71,8 +71,4 @@ void sched_print_stats(void);
  * reachable, counts consistent. Returns true if consistent. */
 bool sched_check(void);
 
-/* Rate-limited switch tracing: log at most `lines` switches, then stop.
- * 0 disables. Off by default so tracing cannot distort the demo. */
-void sched_set_trace(unsigned lines);
-
 #endif /* BHARAT_SCHED_H */

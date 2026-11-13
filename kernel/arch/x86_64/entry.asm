@@ -8,6 +8,7 @@ section .text
 global _start
 
 extern kernel_main
+extern __stack_chk_guard
 extern __bss_start
 extern __bss_end
 
@@ -22,6 +23,21 @@ _start:
 
     lea     rsp, [rel stack_top]
 
+    ; Stack protector canary: mix the time stamp counter into the default
+    ; value so it differs on every boot. Done here, before any C function
+    ; with a canary has started, so no saved copy can go stale. The low
+    ; byte stays 0 (see stack_protector.c).
+    rdtsc
+    shl     rdx, 32
+    or      rax, rdx
+    mov     rdx, 0x9e3779b97f4a7c15     ; spreads TSC bits over all 64
+    imul    rax, rdx
+    xor     rax, [rel __stack_chk_guard]
+    xor     al, al
+    mov     [rel __stack_chk_guard], rax
+
+    ; RBP = 0 marks the outermost frame for call-trace walks.
+    xor     ebp, ebp
     call    kernel_main
 
 .halt:
