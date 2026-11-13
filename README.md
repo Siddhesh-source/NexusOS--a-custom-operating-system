@@ -8,8 +8,8 @@ itself, and is made for the people who use it.**
 ![Architecture](https://img.shields.io/badge/arch-x86--64-blue)
 ![Language](https://img.shields.io/badge/language-C%20%7C%20NASM-informational)
 ![Boot](https://img.shields.io/badge/boot-Limine%20(BIOS%20%2B%20UEFI)-orange)
-![Tests](https://img.shields.io/badge/boot%20tests-352%20passing-brightgreen)
-![Status](https://img.shields.io/badge/progress-Phase%208%20of%2020-yellow)
+![Tests](https://img.shields.io/badge/boot%20tests-382%20passing-brightgreen)
+![Status](https://img.shields.io/badge/progress-Phase%209%20of%2020-yellow)
 
 </div>
 
@@ -24,7 +24,7 @@ simple, solid engineering.
 
 | | What it means for you | Status |
 |---|---|---|
-| ✅ **Checks itself on every boot** | 352 health checks run inside the kernel each time it starts; problems are reported, never hidden | working today |
+| ✅ **Checks itself on every boot** | 382 health checks run inside the kernel each time it starts; problems are reported, never hidden | working today |
 | 💬 **Explains itself** | `why slow`, `why crash`: plain sentences from real system data, offline | Phase 12 |
 | ↩️ **Undo for your files** | saves never overwrite data, so power cuts can't corrupt files and every change can be undone | Phase 14 |
 | 🔒 **Apps ask first** | apps start with no access; you allow or deny; every use is logged | Phase 15 |
@@ -49,6 +49,7 @@ More detail: [Project overview](docs/PROJECT_OVERVIEW.md).
 [ok] Phase 6 debug and hardening verified.
 [ok] Phase 7 modern hardware verified.
 [ok] Phase 8 memory that scales verified.
+[ok] Phase 9 multi-core verified.
 ```
 
 | Area | What's implemented |
@@ -57,6 +58,7 @@ More detail: [Project overview](docs/PROJECT_OVERVIEW.md).
 | **Hardware** | ACPI tables (CPUs, interrupt controllers, HPET, PCIe), PCI device scan, local and I/O APIC |
 | **CPU** | crash handlers for all 32 CPU errors with full reports, emergency stack for double faults, calibrated clock with one-shot alarms |
 | **Memory** | buddy page allocator, slab caches, kernel heap, own page tables (read-only code, no-execute data), one address space per process, pages allocated on first touch, copy-on-write, shareable memory objects |
+| **Multi-core** | all CPUs started, per-CPU data and run queues, work stealing, named spinlocks with a lock-order checker, TLB shootdown, RCU lookups |
 | **Threads** | processes and kernel threads, own guarded stack per thread, assembly context switch |
 | **Scheduler** | preemptive time-sharing (20 ms slices), tickless (an idle CPU gets no timer interrupts), idle thread, sleep, live statistics |
 | **Safety** | guard pages, stack canaries, compiler stack protector, heap poisoning and red zones (use-after-free and overflow caught), corrupted-state detection, interrupt-safe allocators |
@@ -82,9 +84,9 @@ Quit QEMU with **Ctrl+A**, then **X**.
 | `python build.py` | Build the kernel and bootable disk image |
 | `python build.py run` | Boot in QEMU (BIOS), output in the terminal |
 | `python build.py run-uefi` | Boot through UEFI firmware (OVMF) |
-| `python build.py test` | Boot and verify every self-test and the budgets (exit code 0 = pass) |
-| `python build.py test-faults` | Verify all 12 crash-on-purpose demos are caught and reported |
-| `python build.py run --fault-demo <name>` | Boot, then crash on purpose: `pf` `null` `stack` `de` `ud` `df` `ctx` `tstack` `panic` `smash` `uaf` `overflow` |
+| `python build.py test` | Boot and verify every self-test and the budgets (exit code 0 = pass); `--smp N` sets the CPU count (default 4) |
+| `python build.py test-faults` | Verify all 13 crash-on-purpose demos are caught and reported |
+| `python build.py run --fault-demo <name>` | Boot, then crash on purpose: `pf` `null` `stack` `de` `ud` `df` `ctx` `tstack` `panic` `smash` `uaf` `overflow` `lockorder` |
 | `python build.py unit` | Run heap and scheduler unit tests on this machine (millions of cases, seconds) |
 | `python build.py bench` | Measure switch, heap and trace costs; add a row to [docs/benchmarks.md](docs/benchmarks.md) |
 | `python build.py debug` | Start QEMU paused for a debugger; then `gdb -x scripts/bharat.gdb` |
@@ -167,7 +169,7 @@ All suites pass under BIOS and UEFI with zero compiler warnings.
 - [x] **6:** debug and hardening: call traces, stack protector, heap poisoning, unit tests, benchmarks, CI
 - [x] **7:** modern hardware: ACPI, APIC, PCI, tickless timer, screen console
 - [x] **8:** memory that scales: buddy, slab, demand paging, copy-on-write
-- [ ] **9:** multi-core
+- [x] **9:** multi-core: per-CPU queues, spinlocks with lock-order checking, TLB shootdown, RCU
 - [ ] **10–11:** user mode with handles and async rings; microkernel IPC and services
 - [ ] **12:** shell, self-check and explain (`why`)
 - [ ] **13–14:** drivers as services; BharatFS with undo, safe from power cuts
@@ -195,7 +197,8 @@ Step-by-step plan with tests for each phase: [docs/ROADMAP.md](docs/ROADMAP.md)
 │   ├── core/             kernel_main, panic
 │   ├── mm/               buddy allocator, slab caches, page tables, heap, memory objects, page faults
 │   ├── proc/             processes, threads, kernel stacks
-│   ├── sched/            scheduler
+│   ├── sched/            scheduler (per-CPU run queues)
+│   ├── smp/              CPU start-up, per-CPU data, spinlocks, IPIs, RCU
 │   ├── drivers/          serial, screen console (keyboard, disk, mouse to come)
 │   ├── lib/              kprintf, string, box drawing
 │   ├── trace/            call traces (symbol table) and the event trace
@@ -220,7 +223,7 @@ Step-by-step plan with tests for each phase: [docs/ROADMAP.md](docs/ROADMAP.md)
 | [High-level design](docs/design/HLD.md) | layers, components, main flows, key decisions |
 | [Low-level design](docs/design/LLD.md) | structs, constants, system calls, disk format |
 | [Desktop design](docs/design/UI.md) | layout, colours, screens |
-| Phase docs: [2](docs/phases/phase-2-interrupts.md) · [3](docs/phases/phase-3-memory.md) · [4](docs/phases/phase-4-processes.md) · [5](docs/phases/phase-5-scheduler.md) · [6](docs/phases/phase-6-debug-hardening.md) · [7](docs/phases/phase-7-modern-hardware.md) · [8](docs/phases/phase-8-memory-that-scales.md) | how each finished layer works |
+| Phase docs: [2](docs/phases/phase-2-interrupts.md) · [3](docs/phases/phase-3-memory.md) · [4](docs/phases/phase-4-processes.md) · [5](docs/phases/phase-5-scheduler.md) · [6](docs/phases/phase-6-debug-hardening.md) · [7](docs/phases/phase-7-modern-hardware.md) · [8](docs/phases/phase-8-memory-that-scales.md) · [9](docs/phases/phase-9-multi-core.md) | how each finished layer works |
 | [Benchmarks](docs/benchmarks.md) · [Bug journal](docs/BUG_JOURNAL.md) | measured costs over time; hard bugs and how they were found |
 
 ## Tech stack

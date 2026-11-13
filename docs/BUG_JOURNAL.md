@@ -174,3 +174,29 @@ New entries go at the end. Entries 1–7 come from Phases 2–5 (see
   the heap.
 - **Guarding test:** the benchmark table; `slab_check` and the slab
   use-after-free tests still catch single-byte changes.
+
+### 15. One CPU never got work, and a fairness check flaked (Phase 9)
+- **Symptom:** with 4 CPUs, the work-stealing test said the threads ran
+  on CPUs 0x7: CPU 3 never stole anything, every run. Separately, the old
+  fairness check failed about one boot in ten with `--smp 4`, never with
+  `--smp 1`. Those boots looked like crashes at first (QEMU's output
+  stopped mid-line), but the test harness had simply stopped watching
+  two seconds after the `[FAIL]` line.
+- **How found:** temporary per-CPU counters (steal attempts, IPIs
+  received, which branch the reschedule handler took). CPU 3 took plenty
+  of IPIs but its scheduler never tried to steal.
+- **Root cause:** two separate things. (1) A busy CPU woke "the first
+  idle CPU after me" to steal. CPUs 1 and 2, idle again after each short
+  thread, always came first, so CPU 3, tickless and halted, was never
+  asked. (2) With several guest CPUs on one QEMU host thread, the
+  alarm that ends a time slice sometimes arrives several ms late, so
+  single slices vary in length; the check allowed 4 ticks of CPU-time
+  spread, assuming every slice was exactly 2 ticks. The slice counts
+  themselves never differed by more than 1.
+- **Fix:** (1) wake one idle CPU per waiting thread, starting the search
+  at a rotating position; an idle CPU whose try-lock steal fails retries
+  after 1 ms. (2) The kernel's own decisions, slice counts, must still be
+  within 2; CPU time must be within 20% (D21: host lateness is not the
+  kernel's share). A thread getting far more time still fails.
+- **Guarding test:** "the work spread over every CPU" in `smp_test.c`;
+  the fairness check in `sched_test.c` on `--smp 4`.
