@@ -11,9 +11,11 @@ poisoning and red-zone checks.
   (scheduler decision plus register save and restore).
 - **kmalloc_kfree_64 / _4096**: one allocation and free of that size.
 - **trace_event**: recording one event in the trace ring.
+- **pmm_page**: one physical page allocated and freed (batches of 256).
 - **boot_s**: seconds from starting QEMU to the bench results (includes
   all boot self-tests).
 
-| Date | Commit | Host | context_switch | kmalloc_kfree_64 | kmalloc_kfree_4096 | trace_event | boot_s |
-|---|---|---|---|---|---|---|---|
-| 2026-11-13 | 02957e9 | Windows | 1927 | 1982 | 34692 | 214 | 11.0 |
+| Date | Commit | Host | context_switch | kmalloc_kfree_64 | kmalloc_kfree_4096 | trace_event | pmm_page | boot_s |
+|---|---|---|---|---|---|---|---|---|
+| 2026-11-13 | 02957e9 | Windows | 1927 | 1982 | 34692 | 214 | – | 11.0 |
+| 2026-11-13 | 1054b6b | Windows | 4506 | 1865 | 34239 | 213 | 930 | 12.2 |

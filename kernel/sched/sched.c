@@ -30,6 +30,7 @@ static uint64_t slice_end;         /* when the running thread's slice ends */
 static uint64_t last_account;      /* last time the running thread was charged */
 static uint64_t idle_ns;
 static uint64_t armed_at = NO_DEADLINE;   /* pending alarm, if any */
+static bool waking;                /* timer event is waking sleepers */
 
 /* ---- intrusive lists ---------------------------------------------------- */
 
@@ -88,13 +89,15 @@ static void arm_for(const struct thread *run, bool others_ready, uint64_t now)
         if (t->wake_ns < deadline)
             deadline = t->wake_ns;
 
-    if (deadline == armed_at)
+    /* Lazy re-arming: programming the timer is a device-register write,
+     * slow next to a thread switch. Only reprogram when the new deadline
+     * is EARLIER than the pending alarm. A pending alarm that is earlier
+     * than needed (or no longer needed) just fires, and the scheduler
+     * looks again: at most one extra interrupt, instead of a register
+     * write on every switch. */
+    if (deadline >= armed_at)
         return;
     armed_at = deadline;
-    if (deadline == NO_DEADLINE) {
-        clock_cancel_alarm();
-        return;
-    }
     stats.alarms_armed++;
     clock_set_alarm(deadline);
 }
@@ -115,7 +118,7 @@ void sched_state_changed(struct thread *t, task_state_t from, task_state_t to)
     /* A new or woken thread now waits for the CPU: the running thread may
      * have had no slice alarm (it was alone), so set one. Switches
      * (RUNNING -> READY) are handled by schedule() itself. */
-    if (active && to == TASK_READY && from != TASK_RUNNING && t != idle)
+    if (active && !waking && to == TASK_READY && from != TASK_RUNNING && t != idle)
         arm_for(thread_current(), true, clock_now_ns());
 }
 
@@ -200,7 +203,11 @@ void sched_timer_event(void)
     armed_at = NO_DEADLINE;                /* the one-shot alarm has fired */
 
     uint64_t now = clock_now_ns();
+    /* The decision below sets the alarm; waking must not set its own
+     * (it would fire again for nothing right after the switch). */
+    waking = true;
     wake_sleepers(now);
+    waking = false;
 
     /* Idle gives way the moment real work exists; others when their slice
      * is over. */

@@ -14,6 +14,7 @@
 
 #include "cpu.h"
 #include "heap.h"
+#include "pmm.h"
 #include "kprintf.h"
 #include "proc.h"
 #include "sched.h"
@@ -89,6 +90,27 @@ static void bench_heap(const char *name, size_t size)
     kprintf("[bench] %s: %lu cycles/op\n", name, min);
 }
 
+/* ---- page allocator ----------------------------------------------------- */
+
+#define PMM_BATCH 256
+
+/* Allocate a batch of pages, then free them all: the pattern of a process
+ * starting and exiting. Cost per page (alloc + free). */
+static void bench_pmm(void)
+{
+    static uint64_t pages[PMM_BATCH];
+    uint64_t min = ~0ULL;
+    for (int r = 0; r < ROUNDS; r++) {
+        uint64_t t0 = rdtsc();
+        for (int i = 0; i < PMM_BATCH; i++)
+            pages[i] = pmm_alloc_page();
+        for (int i = 0; i < PMM_BATCH; i++)
+            pmm_free_page(pages[i]);
+        min = best(min, (rdtsc() - t0) / PMM_BATCH);
+    }
+    kprintf("[bench] pmm_page: %lu cycles/op\n", min);
+}
+
 /* ---- trace -------------------------------------------------------------- */
 
 #define TRACE_ITERS 20000
@@ -111,6 +133,7 @@ void bench_run(void)
     bench_context_switch();
     bench_heap("kmalloc_kfree_64", 64);
     bench_heap("kmalloc_kfree_4096", 4096);
+    bench_pmm();
     bench_trace();
     kprintf("[bench] done\n");
 }

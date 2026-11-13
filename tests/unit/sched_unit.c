@@ -217,9 +217,18 @@ static void test_sleep_and_idle(void)
     }
     tick();                 /* 5th tick: woken and run at once */
     UCHECK(current == boot_thread, "sleeper runs again after exactly 5 ticks");
-    UCHECK(alarms_fired - fired0 == 1, "tickless: the 5-tick sleep took exactly one alarm (got %lu)",
+    /* Lazy re-arming: an alarm left from before the sleep (an old slice
+     * end) may fire once; then only the wake-up. */
+    UCHECK(alarms_fired - fired0 <= 2, "tickless: the 5-tick sleep took at most 2 alarms (got %lu)",
            alarms_fired - fired0);
     UCHECK(!alarm_armed, "tickless: alone and with no sleepers, no alarm is armed");
+    uint64_t fired_again = alarms_fired;
+    sched_sleep(3);               /* nothing stale left now */
+    for (unsigned i = 0; i < 3; i++)
+        tick();
+    UCHECK(current == boot_thread && alarms_fired - fired_again == 1,
+           "tickless: a sleep with no stale alarm takes exactly one alarm (got %lu)",
+           alarms_fired - fired_again);
     uint64_t fired1 = alarms_fired;
     for (unsigned i = 0; i < 100; i++)
         tick();
@@ -228,7 +237,7 @@ static void test_sleep_and_idle(void)
 
     struct sched_stats s1;
     sched_get_stats(&s1);
-    UCHECK(s1.idle_ticks - s0.idle_ticks == 5, "5 idle ticks counted (got %lu)",
+    UCHECK(s1.idle_ticks - s0.idle_ticks == 8, "8 idle ticks counted, 5 + 3 (got %lu)",
            s1.idle_ticks - s0.idle_ticks);
     UCHECK(sched_check(), "invariants after sleep");
 
