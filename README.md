@@ -8,8 +8,8 @@ itself, and is made for the people who use it.**
 ![Architecture](https://img.shields.io/badge/arch-x86--64-blue)
 ![Language](https://img.shields.io/badge/language-C%20%7C%20NASM-informational)
 ![Boot](https://img.shields.io/badge/boot-Limine%20(BIOS%20%2B%20UEFI)-orange)
-![Tests](https://img.shields.io/badge/boot%20tests-252%20passing-brightgreen)
-![Status](https://img.shields.io/badge/progress-Phase%206%20of%2020-yellow)
+![Tests](https://img.shields.io/badge/boot%20tests-352%20passing-brightgreen)
+![Status](https://img.shields.io/badge/progress-Phase%208%20of%2020-yellow)
 
 </div>
 
@@ -24,7 +24,7 @@ simple, solid engineering.
 
 | | What it means for you | Status |
 |---|---|---|
-| ✅ **Checks itself on every boot** | 252 health checks run inside the kernel each time it starts; problems are reported, never hidden | working today |
+| ✅ **Checks itself on every boot** | 352 health checks run inside the kernel each time it starts; problems are reported, never hidden | working today |
 | 💬 **Explains itself** | `why slow`, `why crash`: plain sentences from real system data, offline | Phase 12 |
 | ↩️ **Undo for your files** | saves never overwrite data, so power cuts can't corrupt files and every change can be undone | Phase 14 |
 | 🔒 **Apps ask first** | apps start with no access; you allow or deny; every use is logged | Phase 15 |
@@ -47,15 +47,18 @@ More detail: [Project overview](docs/PROJECT_OVERVIEW.md).
 [ok] Phase 4 process management verified.
 [ok] Phase 5 scheduler verified.
 [ok] Phase 6 debug and hardening verified.
+[ok] Phase 7 modern hardware verified.
+[ok] Phase 8 memory that scales verified.
 ```
 
 | Area | What's implemented |
 |---|---|
-| **Boot** | Limine (BIOS and UEFI), 64-bit kernel in high memory, serial console |
-| **CPU** | crash handlers for all 32 CPU errors with full reports, emergency stack for double faults, 100 Hz timer |
-| **Memory** | page allocator, own page tables, read-only code and no-execute data, kernel heap, one address space per process |
+| **Boot** | Limine (BIOS and UEFI), 64-bit kernel in high memory, serial console and text on screen |
+| **Hardware** | ACPI tables (CPUs, interrupt controllers, HPET, PCIe), PCI device scan, local and I/O APIC |
+| **CPU** | crash handlers for all 32 CPU errors with full reports, emergency stack for double faults, calibrated clock with one-shot alarms |
+| **Memory** | buddy page allocator, slab caches, kernel heap, own page tables (read-only code, no-execute data), one address space per process, pages allocated on first touch, copy-on-write, shareable memory objects |
 | **Threads** | processes and kernel threads, own guarded stack per thread, assembly context switch |
-| **Scheduler** | preemptive time-sharing (20 ms slices), idle thread, sleep, live statistics |
+| **Scheduler** | preemptive time-sharing (20 ms slices), tickless (an idle CPU gets no timer interrupts), idle thread, sleep, live statistics |
 | **Safety** | guard pages, stack canaries, compiler stack protector, heap poisoning and red zones (use-after-free and overflow caught), corrupted-state detection, interrupt-safe allocators |
 | **Debugging** | crash reports with named call traces and the last 16 kernel events, GDB/LLDB attach mode, host unit tests, benchmarks, size and boot-time budgets, CI |
 
@@ -139,7 +142,7 @@ Design details: [high-level design](docs/design/HLD.md) ·
 
 ## Testing
 
-Every boot runs **252 checks** inside the kernel, then a live multitasking demo:
+Every boot runs **352 checks** inside the kernel, then a live multitasking demo:
 
 | Suite | Checks | Highlights |
 |---|---|---|
@@ -147,9 +150,12 @@ Every boot runs **252 checks** inside the kernel, then a live multitasking demo:
 | Processes | 83 | exact switch trace, register preservation, 60 000-switch stress, stack isolation |
 | Scheduler | 26 | preemption of non-yielding threads, all 15 registers preserved, fairness, idle |
 | Debug & hardening | 29 | symbol lookup, call-trace walk, random canary, use-after-free and overflow detection, event trace |
+| Hardware | 38 | ACPI tables, PCI list, screen text, PIC masked, sleep accuracy, tickless idle, I/O APIC routing |
+| Memory that scales | 62 | buddy split/merge, slab limits and poisoning, demand paging, copy-on-write, shared objects |
 
 Outside the kernel, `python build.py unit` runs about **2.8 million** checks
 on the real heap and scheduler code (random operations against a model),
+plus 1.26 million on the buddy allocator and slab caches,
 and `test-faults` crashes the kernel on purpose 12 ways to check every
 report. CI builds and boots every pull request.
 
@@ -159,7 +165,9 @@ All suites pass under BIOS and UEFI with zero compiler warnings.
 
 - [x] **1–5:** boot, interrupts, memory, threads, preemptive scheduler
 - [x] **6:** debug and hardening: call traces, stack protector, heap poisoning, unit tests, benchmarks, CI
-- [ ] **7–9:** modern hardware (ACPI, APIC, PCI), scalable memory, multi-core
+- [x] **7:** modern hardware: ACPI, APIC, PCI, tickless timer, screen console
+- [x] **8:** memory that scales: buddy, slab, demand paging, copy-on-write
+- [ ] **9:** multi-core
 - [ ] **10–11:** user mode with handles and async rings; microkernel IPC and services
 - [ ] **12:** shell, self-check and explain (`why`)
 - [ ] **13–14:** drivers as services; BharatFS with undo, safe from power cuts
@@ -181,17 +189,19 @@ Step-by-step plan with tests for each phase: [docs/ROADMAP.md](docs/ROADMAP.md)
 ├── .github/workflows/     CI: build, unit tests, one boot test
 ├── scripts/              disk image writer, QEMU test harness, symbol table, budgets, GDB script
 ├── kernel/
-│   ├── arch/x86_64/      entry, linker script, GDT/TSS, IDT, interrupts, timer, context switch
+│   ├── arch/x86_64/      entry, linker script, GDT/TSS, IDT, interrupts, APIC, clock, context switch
+│   ├── acpi/             ACPI tables (MADT, HPET, MCFG)
+│   ├── pci/              PCI device scan
 │   ├── core/             kernel_main, panic
-│   ├── mm/               page allocator, page tables, heap, page faults
+│   ├── mm/               buddy allocator, slab caches, page tables, heap, memory objects, page faults
 │   ├── proc/             processes, threads, kernel stacks
 │   ├── sched/            scheduler
-│   ├── drivers/          serial (keyboard, disk, mouse, screen to come)
+│   ├── drivers/          serial, screen console (keyboard, disk, mouse to come)
 │   ├── lib/              kprintf, string, box drawing
 │   ├── trace/            call traces (symbol table) and the event trace
 │   ├── include/          limine.h
 │   └── tests/            boot-time self-tests and benchmarks
-├── tests/unit/           host-side unit tests (heap, scheduler)
+├── tests/unit/           host-side unit tests (heap, scheduler, buddy, slab)
 ├── user/                 user programs and apps (Phase 10+)
 └── docs/
     ├── PROJECT_OVERVIEW.md, ROADMAP.md
@@ -210,7 +220,7 @@ Step-by-step plan with tests for each phase: [docs/ROADMAP.md](docs/ROADMAP.md)
 | [High-level design](docs/design/HLD.md) | layers, components, main flows, key decisions |
 | [Low-level design](docs/design/LLD.md) | structs, constants, system calls, disk format |
 | [Desktop design](docs/design/UI.md) | layout, colours, screens |
-| Phase docs: [2](docs/phases/phase-2-interrupts.md) · [3](docs/phases/phase-3-memory.md) · [4](docs/phases/phase-4-processes.md) · [5](docs/phases/phase-5-scheduler.md) · [6](docs/phases/phase-6-debug-hardening.md) | how each finished layer works |
+| Phase docs: [2](docs/phases/phase-2-interrupts.md) · [3](docs/phases/phase-3-memory.md) · [4](docs/phases/phase-4-processes.md) · [5](docs/phases/phase-5-scheduler.md) · [6](docs/phases/phase-6-debug-hardening.md) · [7](docs/phases/phase-7-modern-hardware.md) · [8](docs/phases/phase-8-memory-that-scales.md) | how each finished layer works |
 | [Benchmarks](docs/benchmarks.md) · [Bug journal](docs/BUG_JOURNAL.md) | measured costs over time; hard bugs and how they were found |
 
 ## Tech stack

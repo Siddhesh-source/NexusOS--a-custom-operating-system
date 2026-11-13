@@ -35,7 +35,7 @@ python build.py run                 # boot in QEMU (BIOS), serial in terminal; q
 python build.py run-uefi            # boot through UEFI firmware
 python build.py test                # build + boot + check all self-tests and budgets (exit 0 = pass)
 python build.py test-faults         # build 12 crash-on-purpose kernels, check each report
-python build.py unit                # host unit tests: heap and scheduler code, millions of cases
+python build.py unit                # host unit tests: heap, scheduler, buddy, slab (millions of cases)
 python build.py bench               # benchmarks -> appends a row to docs/benchmarks.md
 python build.py debug               # QEMU paused for GDB on :1234; then: gdb -x scripts/bharat.gdb
 python build.py clean
@@ -43,7 +43,7 @@ python build.py clean
 
 Run `python build.py test` after **every** change. Run `test-faults` after
 touching interrupts, memory, stacks or context switching, and `unit` after
-touching the heap, scheduler, trace or kprintf. On Windows, tool
+touching the heap, page allocator, slab, scheduler, trace or kprintf. On Windows, tool
 paths come from `.env` (`BHARAT_CLANG`, `BHARAT_NASM`, `BHARAT_QEMU`, ...;
 see `.env.example`).
 
@@ -56,12 +56,16 @@ scripts/                 fat32.py (disk image), test_boot.py (QEMU test harness)
 .github/workflows/       CI: one quick job (unit tests + one BIOS boot test)
 boot/limine.conf         boot menu
 kernel/
-  arch/x86_64/           CPU-specific: entry.asm, linker.ld, GDT/TSS, IDT, interrupts, PIT/PIC timer, context switch
+  arch/x86_64/           CPU-specific: entry.asm, linker.ld, GDT/TSS, IDT, interrupts, APIC,
+                         clock (calibration, one-shot alarms), early PIT/PIC, context switch
+  acpi/                  ACPI table parsing (MADT, HPET, MCFG)
+  pci/                   PCI scan (ECAM or I/O ports)
   core/                  kernel_main (boot order) and panic
-  mm/                    physical pages (pmm), page tables (vmm), heap, page faults, mm_init
+  mm/                    buddy allocator (pmm), slab caches, page tables (vmm), heap,
+                         memory objects/regions/demand paging/COW (vm), page faults
   proc/                  processes, threads, kernel stacks
   sched/                 scheduler
-  drivers/               device drivers (serial today)
+  drivers/               device drivers (serial, screen console)
   lib/                   kprintf, string, box drawing
   trace/                 call traces (backtrace.c + generated symbol table), event trace ring
   include/               third-party headers (limine.h)
