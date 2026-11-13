@@ -120,8 +120,10 @@ compiled; every folder with a `.h` is on the include path. So:
 - Never commit phase work directly to `main`.
 - When the phase is complete and its tests pass: push the branch, open a
   PR to `main` with `gh pr create` (summary of what changed + test
-  results), then merge it (`gh pr merge --squash --delete-branch`, or
-  `--merge` if the commits are worth keeping separately), and pull `main`.
+  results), then merge it (`gh pr merge --squash`, or `--merge` if the
+  commits are worth keeping separately), and pull `main`.
+- **Never delete branches**, local or remote: no `--delete-branch`, no
+  `git branch -d`, no `git push --delete`. Every phase branch is kept.
 
 **Commits**
 - Commit in **batches**: one commit per logical group of finished,
@@ -137,6 +139,9 @@ compiled; every folder with a `.h` is on the include path. So:
     `build`, `tests`, `docs`, ...
   - Breaking changes: `type(scope)!:` plus a `BREAKING CHANGE:` line in
     the body.
+- **No AI attribution anywhere:** no `Co-Authored-By: Claude`, no
+  "Generated with Claude Code" lines, no AI watermark in commits, PRs,
+  code or docs. Commits use the repository owner's own git identity.
 - **Never mention phase numbers** in commit messages or PR titles.
   Describe what actually changed: `feat(arch): print symbolised call
   traces on panic`, not `Phase 6 step 2`.
