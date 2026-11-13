@@ -8,6 +8,7 @@
 #include "panic.h"
 #include "string.h"
 #include "trace.h"
+#include "spinlock.h"
 
 #define OBJECT_MAGIC 0x564D4F42u        /* "VMOB" */
 #define USER_TOP     0x0000800000000000ULL
@@ -31,6 +32,9 @@ struct vm_region {
     struct vm_region *next_map; /* in the object's mapping list */
 };
 
+/* One lock for all objects and regions. Public functions take it; the
+ * *_locked helpers expect it held, so they can call each other. */
+static struct spinlock vm_lock = SPINLOCK_INIT(LOCK_CLASS_VM);
 static struct slab_cache *object_cache, *region_cache;
 static struct vm_stats stats;
 
@@ -50,11 +54,10 @@ static bool object_valid(const struct vm_object *o)
 
 /* ---- objects ------------------------------------------------------------ */
 
-struct vm_object *vm_object_create(uint64_t pages)
+static struct vm_object *object_create_locked(uint64_t pages)
 {
     if (pages == 0 || pages > VM_MAX_OBJECT_PAGES)
         return NULL;
-    IRQ_GUARD();
     if (!init_caches())
         return NULL;
     struct vm_object *o = slab_zalloc(object_cache);
@@ -72,17 +75,22 @@ struct vm_object *vm_object_create(uint64_t pages)
     return o;
 }
 
+struct vm_object *vm_object_create(uint64_t pages)
+{
+    SPIN_GUARD(&vm_lock);
+    return object_create_locked(pages);
+}
+
 void vm_object_ref(struct vm_object *o)
 {
-    IRQ_GUARD();
+    SPIN_GUARD(&vm_lock);
     if (!object_valid(o))
         panic("vm: reference to an invalid memory object");
     o->refs++;
 }
 
-void vm_object_release(struct vm_object *o)
+static void object_release_locked(struct vm_object *o)
 {
-    IRQ_GUARD();
     if (!object_valid(o))
         panic("vm: release of an invalid memory object");
     if (--o->refs > 0)
@@ -99,6 +107,12 @@ void vm_object_release(struct vm_object *o)
     o->magic = 0;
     slab_free(object_cache, o);
     stats.objects--;
+}
+
+void vm_object_release(struct vm_object *o)
+{
+    SPIN_GUARD(&vm_lock);
+    object_release_locked(o);
 }
 
 uint64_t vm_object_pages(const struct vm_object *o)
@@ -143,10 +157,10 @@ static void write_protect_everywhere(struct vm_object *o)
 
 struct vm_object *vm_object_clone_cow(struct vm_object *o)
 {
-    IRQ_GUARD();
+    SPIN_GUARD(&vm_lock);
     if (!object_valid(o))
         return NULL;
-    struct vm_object *c = vm_object_create(o->npages);
+    struct vm_object *c = object_create_locked(o->npages);
     if (c == NULL)
         return NULL;
     for (uint64_t i = 0; i < o->npages; i++) {
@@ -170,13 +184,12 @@ static bool range_ok(uint64_t virt, uint64_t pages)
            && pages <= (USER_TOP - virt) / PAGE_SIZE;
 }
 
-vm_status_t vm_map(address_space_t *as, uint64_t virt, struct vm_object *o,
-                   uint64_t first, uint64_t pages, uint32_t flags)
+static vm_status_t map_locked(address_space_t *as, uint64_t virt, struct vm_object *o,
+                              uint64_t first, uint64_t pages, uint32_t flags)
 {
     if (as == NULL || as == vmm_kernel_space() || !range_ok(virt, pages)
         || (flags & ~(VM_WRITE | VM_EXEC)) != 0)
         return VM_ERR_INVALID;
-    IRQ_GUARD();
     if (!object_valid(o) || first > o->npages || pages > o->npages - first)
         return VM_ERR_INVALID;
     uint64_t end = virt + pages * PAGE_SIZE;
@@ -205,14 +218,21 @@ vm_status_t vm_map(address_space_t *as, uint64_t virt, struct vm_object *o,
     return VM_OK;
 }
 
+vm_status_t vm_map(address_space_t *as, uint64_t virt, struct vm_object *o,
+                   uint64_t first, uint64_t pages, uint32_t flags)
+{
+    SPIN_GUARD(&vm_lock);
+    return map_locked(as, virt, o, first, pages, flags);
+}
+
 vm_status_t vm_reserve(address_space_t *as, uint64_t virt, uint64_t pages, uint32_t flags)
 {
-    IRQ_GUARD();
-    struct vm_object *o = vm_object_create(pages);
+    SPIN_GUARD(&vm_lock);
+    struct vm_object *o = object_create_locked(pages);
     if (o == NULL)
         return VM_ERR_NO_MEMORY;
-    vm_status_t st = vm_map(as, virt, o, 0, pages, flags);
-    vm_object_release(o);            /* the region's reference is the only one */
+    vm_status_t st = map_locked(as, virt, o, 0, pages, flags);
+    object_release_locked(o);        /* the region's reference is the only one */
     return st;
 }
 
@@ -229,14 +249,14 @@ static void remove_region(struct vm_region **link)
     struct vm_object *o = r->obj;
     slab_free(region_cache, r);
     stats.regions--;
-    vm_object_release(o);
+    object_release_locked(o);
 }
 
 vm_status_t vm_unmap(address_space_t *as, uint64_t virt)
 {
     if (as == NULL)
         return VM_ERR_INVALID;
-    IRQ_GUARD();
+    SPIN_GUARD(&vm_lock);
     for (struct vm_region **link = &as->regions; *link != NULL; link = &(*link)->next) {
         if ((*link)->start == virt) {
             remove_region(link);
@@ -248,7 +268,7 @@ vm_status_t vm_unmap(address_space_t *as, uint64_t virt)
 
 void vm_space_release(address_space_t *as)
 {
-    IRQ_GUARD();
+    SPIN_GUARD(&vm_lock);
     while (as != NULL && as->regions != NULL)
         remove_region(&as->regions);
 }
@@ -259,7 +279,7 @@ bool vm_handle_fault(uint64_t addr, uint64_t error_code)
 {
     if (addr >= USER_TOP || (error_code & PF_ERR_RSVD))
         return false;
-    IRQ_GUARD();
+    SPIN_GUARD(&vm_lock);
     address_space_t *as = vmm_current_space();
     if (as == NULL)
         return false;
@@ -328,7 +348,7 @@ bool vm_handle_fault(uint64_t addr, uint64_t error_code)
 
 void vm_get_stats(struct vm_stats *out)
 {
-    IRQ_GUARD();
+    SPIN_GUARD(&vm_lock);
     *out = stats;
 }
 

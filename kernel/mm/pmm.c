@@ -3,6 +3,7 @@
 #include "kprintf.h"
 #include "panic.h"
 #include "string.h"
+#include "spinlock.h"
 
 /* One record per frame, from physical address 0 to the end of the highest
  * usable region. Free blocks are linked through their first frame's
@@ -42,6 +43,8 @@ static uint64_t non_ram_bytes;
 #define HOT_MAX 64
 static uint32_t hot[HOT_MAX];
 static unsigned hot_count;
+
+static struct spinlock pmm_lock = SPINLOCK_INIT(LOCK_CLASS_PMM);
 
 /* ---- free lists ---------------------------------------------------------- */
 
@@ -220,7 +223,7 @@ uint64_t pmm_alloc_pages(unsigned order)
 {
     if (order > PMM_MAX_ORDER)
         return 0;
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&pmm_lock);
     uint32_t f = alloc_block(order);
     return f == NONE ? 0 : (uint64_t)f << PAGE_SHIFT;
 }
@@ -276,7 +279,7 @@ static void free_block_checked(uint32_t f, unsigned order)
 
 pmm_status_t pmm_free_pages(uint64_t phys, unsigned order)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&pmm_lock);
     pmm_status_t st = check_block(phys, order);
     if (st != PMM_OK) {
         kprintf("[pmm] rejected free of %p (order %u): %s\n", (void *)phys, order,
@@ -296,7 +299,7 @@ pmm_status_t pmm_free_page(uint64_t phys)
 
 pmm_status_t pmm_page_ref(uint64_t phys)
 {
-    IRQ_GUARD();
+    SPIN_GUARD(&pmm_lock);
     pmm_status_t st = check_block(phys, 0);
     if (st != PMM_OK)
         return st;
@@ -309,7 +312,7 @@ pmm_status_t pmm_page_ref(uint64_t phys)
 
 bool pmm_page_unref(uint64_t phys)
 {
-    IRQ_GUARD();
+    SPIN_GUARD(&pmm_lock);
     if (check_block(phys, 0) != PMM_OK) {
         kprintf("[pmm] rejected unref of %p: not an allocated page\n", (void *)phys);
         return false;
@@ -323,13 +326,13 @@ bool pmm_page_unref(uint64_t phys)
 
 unsigned pmm_page_refcount(uint64_t phys)
 {
-    IRQ_GUARD();
+    SPIN_GUARD(&pmm_lock);
     return check_block(phys, 0) == PMM_OK ? pages[phys >> PAGE_SHIFT].refcount : 0;
 }
 
 bool pmm_is_allocated(uint64_t phys)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&pmm_lock);
     if (!IS_PAGE_ALIGNED(phys) || phys == 0 || (phys >> PAGE_SHIFT) >= frame_count)
         return false;
     uint8_t fl = pages[phys >> PAGE_SHIFT].flags;
@@ -345,7 +348,7 @@ uint64_t pmm_free_page_count(void)
 
 void pmm_get_stats(struct pmm_stats *out)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&pmm_lock);
     out->total_bytes = total_bytes;
     out->usable_bytes = usable_bytes;
     out->reserved_bytes = total_bytes - usable_bytes;
@@ -379,13 +382,13 @@ void pmm_print_stats(void)
 
 void pmm_drain_cache(void)
 {
-    IRQ_GUARD();
+    SPIN_GUARD(&pmm_lock);
     drain_hot(0);
 }
 
 bool pmm_check(void)
 {
-    IRQ_GUARD();
+    SPIN_GUARD(&pmm_lock);
     uint64_t counted = hot_count;
     for (unsigned i = 0; i < hot_count; i++) {
         const struct pmm_page *p = &pages[hot[i]];

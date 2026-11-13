@@ -17,10 +17,14 @@
  * silent. The alarm calls the handler given to clock_init() from the
  * interrupt, after the end-of-interrupt is sent.
  *
- * Limits: assumes the TSC runs at a constant rate (true on CPUs from the
- * last 15 years and in QEMU); one CPU; the alarm's longest single wait is
- * limited by the 32-bit APIC counter (tens of seconds; longer waits fire
- * early and the caller re-arms). */
+ * Every CPU has its own APIC timer, so each CPU sets its own alarm
+ * (clock_set_alarm acts on the calling CPU).
+ *
+ * Limits: assumes the TSC runs at a constant rate and in step on all CPUs
+ * (true on CPUs from the last 15 years and in QEMU); assumes every APIC
+ * timer runs at the boot CPU's measured rate; the alarm's longest single
+ * wait is limited by the 32-bit APIC counter (tens of seconds; longer
+ * waits fire early and the caller re-arms). */
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -31,11 +35,15 @@
  * APIC (apic_init) and ACPI. */
 void clock_init(void (*on_alarm)(void));
 
+/* Set up the calling CPU's APIC timer (another CPU, after clock_init). */
+void clock_init_cpu(void);
+
 bool clock_ready(void);
 uint64_t clock_now_ns(void);
 
-/* Fire once at `deadline_ns` (clock_now_ns time). A deadline in the past
- * fires almost at once. Replaces any earlier alarm. */
+/* Fire once at `deadline_ns` (clock_now_ns time) on the calling CPU. A
+ * deadline in the past fires almost at once. Replaces any earlier alarm
+ * of this CPU. */
 void clock_set_alarm(uint64_t deadline_ns);
 void clock_cancel_alarm(void);
 

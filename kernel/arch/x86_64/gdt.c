@@ -1,12 +1,18 @@
 #include "gdt.h"
 #include "serial.h"
+#include "percpu.h"
 #include <stdint.h>
 
-/* GDT entries: slots 0-2 are 8-byte code/data descriptors; slot 3 onward
+/* One GDT and TSS per CPU: the TSS holds the CPU's own emergency (IST)
+ * stack, and the busy flag that `ltr` sets in the TSS descriptor would
+ * stop a second CPU from loading a shared one.
+ *
+ * GDT entries: slots 0-2 are 8-byte code/data descriptors; slot 3 onward
  * holds the 16-byte long-mode TSS descriptor. Index 4 is reserved as the
  * upper half of that 16-byte descriptor (unused, must read as zero). */
-static struct gdt_entry gdt_entries[5];
-static struct gdt_ptr gdt_ptr;
+static struct gdt_entry gdt_table[SMP_MAX_CPUS][5];
+static struct gdt_ptr gdt_ptrs[SMP_MAX_CPUS];
+static struct gdt_entry *gdt_entries;     /* the CPU being set up */
 
 /* TSS structure */
 struct tss_entry {
@@ -29,9 +35,9 @@ struct tss_entry {
 
 _Static_assert(sizeof(struct tss_entry) == 0x68, "64-bit TSS must be 104 bytes");
 
-/* IST stack for double fault (4KB aligned) */
-static uint8_t ist1_stack[4096] __attribute__((aligned(4096)));
-static struct tss_entry tss_entry;
+/* IST stack for double fault (4KB aligned), one per CPU. */
+static uint8_t ist1_stacks[SMP_MAX_CPUS][4096] __attribute__((aligned(4096)));
+static struct tss_entry tss_entries[SMP_MAX_CPUS];
 
 void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran)
 {
@@ -62,12 +68,16 @@ static void gdt_set_tss_gate(int num, uint64_t base, uint32_t limit, uint8_t acc
     desc->zero        = 0;
 }
 
-void gdt_init(void)
+void gdt_init_cpu(unsigned cpu)
 {
+    gdt_entries = gdt_table[cpu];
+    struct gdt_ptr *gdt_ptr = &gdt_ptrs[cpu];
+    struct tss_entry *tss_entry = &tss_entries[cpu];
+
     /* Setup GDT pointer: covers 5 entries (slots 0..4), the last slot being
      * the upper half of the 16-byte TSS descriptor. */
-    gdt_ptr.limit = (sizeof(struct gdt_entry) * 5) - 1;
-    gdt_ptr.base = (uint64_t)&gdt_entries;
+    gdt_ptr->limit = (sizeof(struct gdt_entry) * 5) - 1;
+    gdt_ptr->base = (uint64_t)gdt_entries;
 
     /* Null descriptor */
     gdt_set_gate(0, 0, 0, 0, 0);
@@ -80,25 +90,30 @@ void gdt_init(void)
     gdt_set_gate(2, 0, 0xFFFFF, 0x92, 0xCF); /* writable */
 
     /* TSS descriptor (long-mode, 16-byte system descriptor at index 3) */
-    uint64_t tss_base = (uint64_t)&tss_entry;
+    uint64_t tss_base = (uint64_t)tss_entry;
     uint32_t tss_limit = sizeof(struct tss_entry) - 1;
     /* access=0x89: Present | 64-bit Available TSS. Limit is byte-granular. */
     gdt_set_tss_gate(3, tss_base, tss_limit, 0x89);
 
-    /* Initialize TSS */
-    /* Zero the TSS */
-    for (unsigned i = 0; i < sizeof(tss_entry); i++) {
-        ((uint8_t*)&tss_entry)[i] = 0;
-    }
-    /* Set IST1 to point to the top of the IST1 stack */
-    tss_entry.ist1 = (uint64_t)&ist1_stack + sizeof(ist1_stack);
+    /* Zero the TSS, then point IST1 at the top of this CPU's IST1 stack. */
+    for (unsigned i = 0; i < sizeof(*tss_entry); i++)
+        ((uint8_t *)tss_entry)[i] = 0;
+    tss_entry->ist1 = (uint64_t)&ist1_stacks[cpu] + sizeof(ist1_stacks[cpu]);
 
     /* Flush the old GDT and install the new one */
-    gdt_flush((uint64_t)&gdt_ptr);
+    gdt_flush((uint64_t)gdt_ptr);
 
     /* Load the TSS selector into TR */
     gdt_load_tr(GDT_TSS_SEL);
 
+    /* Loading the GS selector above cleared the GS base: point it at this
+     * CPU's per-CPU record again. */
+    percpu_load_gs(cpu_at(cpu));
+}
+
+void gdt_init(void)
+{
+    gdt_init_cpu(0);
     serial_puts("[gdt] GDT and TSS initialized.\n");
 }
 

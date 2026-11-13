@@ -3,6 +3,9 @@
 #include "cpu.h"
 #include "kprintf.h"
 #include "panic.h"
+#include "spinlock.h"
+#include "percpu.h"
+#include "ipi.h"
 
 /* Hardware page-table entry bits */
 #define PTE_PRESENT   (1ULL << 0)
@@ -26,8 +29,10 @@ extern char __data_start[], __kernel_end[];
 extern char stack_bottom[];
 
 static address_space_t kernel_space;
-static address_space_t *current_space;
 static uint64_t hhdm_limit;          /* end of the highest HHDM-mapped phys */
+static struct spinlock vmm_lock = SPINLOCK_INIT(LOCK_CLASS_VMM);
+static volatile uint64_t shootdowns;
+uint64_t smp_ap_cr3;                 /* page tables an AP loads (ap_entry.asm) */
 
 bool vmm_is_canonical(uint64_t virt)
 {
@@ -100,11 +105,51 @@ static uint64_t *walk(address_space_t *as, uint64_t virt, bool create, vmm_statu
     return &table[(virt >> PAGE_SHIFT) & (ENTRIES_PER_TABLE - 1)];
 }
 
-static void flush_page(address_space_t *as, uint64_t virt)
+/* ---- TLB shootdown -------------------------------------------------------
+ * Each CPU caches translations in its TLB. When a mapping is removed or
+ * loses a permission, every CPU that may have cached it must drop it,
+ * or it could keep using the old page (which may already belong to
+ * someone else). The local CPU uses invlpg; the others are asked with an
+ * IPI and we wait until all have done it. A new mapping needs nothing:
+ * CPUs never cache "not present". */
+
+struct shootdown {
+    uint64_t virt;
+    uint64_t pml4;
+    bool kernel;
+};
+
+static void shootdown_here(void *arg)
+{
+    const struct shootdown *s = arg;
+    if (s->kernel || (read_cr3() & PTE_ADDR_MASK) == s->pml4)
+        invlpg(s->virt);
+}
+
+static void flush_page(address_space_t *as, uint64_t virt, bool remote)
 {
     /* Kernel-half entries are shared by every space; always flush them. */
-    if (is_kernel_half(virt) || as->pml4_phys == (read_cr3() & PTE_ADDR_MASK))
+    bool kernel = is_kernel_half(virt) || as == &kernel_space;
+    if (kernel || as->pml4_phys == (read_cr3() & PTE_ADDR_MASK))
         invlpg(virt);
+    if (!remote || smp_cpu_count() < 2)
+        return;
+    /* Kernel pages may be cached anywhere; a user page only where its
+     * address space is loaded. The fence orders our PTE write before
+     * reading the mask, against vmm_switch's opposite order. */
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    uint32_t mask = kernel ? smp_online_mask() : __atomic_load_n(&as->cpus, __ATOMIC_ACQUIRE);
+    mask &= ~(1u << cpu_id());
+    if (mask == 0)
+        return;
+    struct shootdown s = { .virt = virt, .pml4 = as->pml4_phys, .kernel = kernel };
+    smp_call(mask, shootdown_here, &s, false);
+    __atomic_fetch_add(&shootdowns, 1, __ATOMIC_RELAXED);
+}
+
+uint64_t vmm_shootdown_count(void)
+{
+    return shootdowns;
 }
 
 static vmm_status_t check_virt(address_space_t *as, uint64_t virt)
@@ -133,7 +178,7 @@ static vmm_status_t check_flags(uint64_t virt, uint32_t flags)
 
 vmm_status_t vmm_map_page(address_space_t *as, uint64_t virt, uint64_t phys, uint32_t flags)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&vmm_lock);
     vmm_status_t st = check_virt(as, virt);
     if (st != VMM_OK)
         return st;
@@ -151,13 +196,13 @@ vmm_status_t vmm_map_page(address_space_t *as, uint64_t virt, uint64_t phys, uin
         return VMM_ERR_ALREADY_MAPPED;
 
     *pte = phys | flags_to_pte(flags);
-    flush_page(as, virt);
+    flush_page(as, virt, false);
     return VMM_OK;
 }
 
 vmm_status_t vmm_unmap_page(address_space_t *as, uint64_t virt, uint64_t *old_phys)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&vmm_lock);
     vmm_status_t st = check_virt(as, virt);
     if (st != VMM_OK)
         return st;
@@ -171,13 +216,13 @@ vmm_status_t vmm_unmap_page(address_space_t *as, uint64_t virt, uint64_t *old_ph
     if (old_phys != NULL)
         *old_phys = *pte & PTE_ADDR_MASK;
     *pte = 0;
-    flush_page(as, virt);
+    flush_page(as, virt, true);
     return VMM_OK;
 }
 
 vmm_status_t vmm_translate(address_space_t *as, uint64_t virt, uint64_t *phys)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&vmm_lock);
     if (as == NULL || as->pml4_phys == 0)
         return VMM_ERR_INVALID;
     if (!vmm_is_canonical(virt))
@@ -197,7 +242,7 @@ vmm_status_t vmm_translate(address_space_t *as, uint64_t virt, uint64_t *phys)
 
 vmm_status_t vmm_get_flags(address_space_t *as, uint64_t virt, uint32_t *flags)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&vmm_lock);
     vmm_status_t st = check_virt(as, virt);
     if (st != VMM_OK)
         return st;
@@ -214,7 +259,7 @@ vmm_status_t vmm_get_flags(address_space_t *as, uint64_t virt, uint32_t *flags)
 
 vmm_status_t vmm_protect_page(address_space_t *as, uint64_t virt, uint32_t flags)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&vmm_lock);
     vmm_status_t st = check_virt(as, virt);
     if (st != VMM_OK)
         return st;
@@ -228,7 +273,7 @@ vmm_status_t vmm_protect_page(address_space_t *as, uint64_t virt, uint32_t flags
         return VMM_ERR_NOT_MAPPED;
 
     *pte = (*pte & PTE_ADDR_MASK) | flags_to_pte(flags);
-    flush_page(as, virt);
+    flush_page(as, virt, true);
     return VMM_OK;
 }
 
@@ -249,7 +294,7 @@ vmm_status_t vmm_map_range(address_space_t *as, uint64_t virt, uint64_t phys,
 
 vmm_status_t vmm_reserve_tables(address_space_t *as, uint64_t virt, uint64_t size)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&vmm_lock);
     vmm_status_t st = check_virt(as, virt);
     if (st != VMM_OK)
         return st;
@@ -269,7 +314,7 @@ vmm_status_t vmm_reserve_tables(address_space_t *as, uint64_t virt, uint64_t siz
 
 vmm_status_t vmm_create_address_space(address_space_t *out)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&vmm_lock);
     if (out == NULL)
         return VMM_ERR_INVALID;
 
@@ -284,6 +329,7 @@ vmm_status_t vmm_create_address_space(address_space_t *out)
 
     out->pml4_phys = pml4;
     out->regions = NULL;
+    out->cpus = 0;
     return VMM_OK;
 }
 
@@ -303,9 +349,11 @@ static void free_table(uint64_t phys, int level)
 
 vmm_status_t vmm_destroy_address_space(address_space_t *as)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    SPIN_GUARD(&vmm_lock);
+    /* Refused while any CPU still has it loaded. */
     if (as == NULL || as->pml4_phys == 0 || as == &kernel_space
         || as->pml4_phys == kernel_space.pml4_phys
+        || __atomic_load_n(&as->cpus, __ATOMIC_ACQUIRE) != 0
         || as->pml4_phys == (read_cr3() & PTE_ADDR_MASK))
         return VMM_ERR_INVALID;
 
@@ -321,9 +369,37 @@ vmm_status_t vmm_destroy_address_space(address_space_t *as)
 
 void vmm_switch(address_space_t *as)
 {
-    IRQ_GUARD();   /* preemption-safe: see cpu.h */
+    IRQ_GUARD();   /* this CPU only: no lock needed */
+    struct percpu *c = this_cpu();
+    address_space_t *old = c->space;
+    uint32_t bit = 1u << c->id;
+    /* Join the new space's CPU mask before loading it (a full barrier),
+     * so a CPU changing its mappings either sees us in the mask or
+     * finished its change before our CR3 load: no stale TLB entry. */
+    __atomic_fetch_or(&as->cpus, bit, __ATOMIC_SEQ_CST);
     write_cr3(as->pml4_phys);
-    current_space = as;
+    c->space = as;
+    if (old != NULL && old != as)
+        __atomic_fetch_and(&old->cpus, ~bit, __ATOMIC_SEQ_CST);
+}
+
+vmm_status_t vmm_translate_kernel(uint64_t virt, uint64_t *phys)
+{
+    /* Kernel-half page tables are never freed and their entries are
+     * written whole, so a lock-free walk is safe; a racing unmap just
+     * gives either answer. */
+    if (!is_kernel_half(virt) || !vmm_is_canonical(virt) || kernel_space.pml4_phys == 0)
+        return VMM_ERR_INVALID;
+    vmm_status_t st;
+    uint64_t *pte = walk(&kernel_space, PAGE_ALIGN_DOWN(virt), false, &st);
+    if (pte == NULL)
+        return st;
+    uint64_t e = __atomic_load_n(pte, __ATOMIC_RELAXED);
+    if (!(e & PTE_PRESENT))
+        return VMM_ERR_NOT_MAPPED;
+    if (phys != NULL)
+        *phys = (e & PTE_ADDR_MASK) | (virt & PAGE_MASK);
+    return VMM_OK;
 }
 
 address_space_t *vmm_kernel_space(void)
@@ -333,7 +409,7 @@ address_space_t *vmm_kernel_space(void)
 
 address_space_t *vmm_current_space(void)
 {
-    return current_space;
+    return this_cpu()->space;
 }
 
 /* ---- boot-time construction -------------------------------------------- */
@@ -436,6 +512,7 @@ void vmm_init(const struct boot_mem_info *info)
     write_cr4(read_cr4() | CR4_PGE);
 
     vmm_switch(&kernel_space);
+    smp_ap_cr3 = kernel_space.pml4_phys;
     /* Toggling PGE flushes global TLB entries left over from Limine's tables. */
     write_cr4(read_cr4() & ~CR4_PGE);
     write_cr4(read_cr4() | CR4_PGE);

@@ -25,8 +25,20 @@
  * The boot flow (kernel_main on the boot stack) is adopted as thread 0 of
  * the kernel process (PID 0), so the kernel can switch away and back.
  *
- * Single CPU, not SMP-safe. Table updates and switches run with interrupts
- * disabled. */
+ * Multi-core (Phase 9):
+ *   - the process and thread tables, each process's thread list and its
+ *     summary state are guarded by the "process table" spinlock;
+ *   - a thread's state is guarded by its CPU's run-queue lock (sched.h);
+ *     lock order: run queue, then process table;
+ *   - lookups (process_find, thread_find, validity checks) take no lock:
+ *     they read the tables as RCU readers (interrupts off), and threads
+ *     and processes are freed only after rcu_synchronize(), so a reader
+ *     never touches freed memory. A pointer returned by a lookup is still
+ *     only safe to use while the object cannot be reaped (Phase 10 adds
+ *     handles with reference counts);
+ *   - a thread running on another CPU cannot be stopped at once:
+ *     thread_terminate marks it `kill` and that CPU ends it at its next
+ *     scheduling decision (it is told with an IPI). */
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -42,7 +54,7 @@ typedef uint32_t tid_t;
 typedef enum {
     TASK_NEW = 0,       /* created, not yet runnable */
     TASK_READY,         /* runnable, waiting to be switched to */
-    TASK_RUNNING,       /* executing on the CPU (exactly one thread) */
+    TASK_RUNNING,       /* executing on a CPU */
     TASK_BLOCKED,       /* waiting for something; not runnable */
     TASK_TERMINATED,    /* finished; resources await proc_reap() */
 } task_state_t;
@@ -109,7 +121,17 @@ struct thread {
     uint64_t cpu_ns;              /* time spent RUNNING */
     uint64_t cpu_ticks;           /* cpu_ns in scheduler ticks (10 ms) */
     uint64_t preempted_count;     /* times the timer took the CPU away */
+
+    /* Multi-core (sched.c). */
+    uint32_t cpu;                 /* CPU whose run queue owns this thread */
+    bool pinned;                  /* never moved to another CPU */
+    volatile bool kill;           /* terminate at the next scheduling point */
+    uint8_t flags;                /* THREAD_* */
+    uint32_t ran_on;              /* bit mask of CPUs it has run on */
 };
+
+#define THREAD_IDLE       (1u << 0)  /* a CPU's idle thread */
+#define THREAD_ANY_CPU    (~0u)      /* thread_create_on: no pinning */
 
 /* Which scheduler list a thread is on (struct thread.sched_list). */
 #define SCHED_LIST_NONE   0
@@ -129,11 +151,21 @@ struct process *process_create(const char *name, uint32_t flags, proc_status_t *
 proc_status_t process_terminate(struct process *p);
 
 /* Create a READY kernel thread in process p that will run entry(arg) when
- * first switched to. Its return value becomes the exit code. */
+ * first switched to. Its return value becomes the exit code. It may run
+ * on any CPU (the scheduler places it and may move it). */
 struct thread *thread_create(struct process *p, const char *name,
                              thread_entry_t entry, void *arg, proc_status_t *err);
 
-/* Mark a thread that is not running as TERMINATED. */
+/* Same, but pinned to CPU `cpu` (or THREAD_ANY_CPU for no pinning). */
+struct thread *thread_create_on(struct process *p, const char *name, thread_entry_t entry,
+                                void *arg, unsigned cpu, proc_status_t *err);
+
+/* An idle thread for an application processor that is about to start:
+ * its stack is where the CPU starts, so it is RUNNING from the outset. */
+struct thread *thread_create_idle(unsigned cpu);
+
+/* Mark a thread TERMINATED. One running on another CPU is marked `kill`
+ * and ends at that CPU's next scheduling point. */
 proc_status_t thread_terminate(struct thread *t);
 
 /* Release a TERMINATED thread's stack and structure. */
@@ -163,8 +195,17 @@ uint64_t proc_cache_pages(void);
 proc_status_t thread_switch(struct thread *next);
 
 /* Validated state change for use by the scheduler. Entering RUNNING is
- * reserved to thread_switch, and a running thread ends via thread_exit. */
+ * reserved to thread_switch, and a running thread ends via thread_exit.
+ * A thread running on another CPU cannot be changed (BUSY). */
 proc_status_t thread_set_state(struct thread *t, task_state_t state);
+
+/* For sched.c: the same, with t's run-queue lock already held. */
+proc_status_t thread_set_state_locked(struct thread *t, task_state_t state);
+
+/* For sched.c: switch from the calling thread to `next` (READY, on this
+ * CPU's queue). This CPU's run-queue lock must be held; the thread that
+ * runs next releases it (sched_finish_switch). */
+void thread_switch_to(struct thread *next);
 
 /* Saved context of a suspended thread, or NULL while it runs. */
 const struct cpu_context *thread_get_context(const struct thread *t);

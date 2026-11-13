@@ -44,6 +44,9 @@ unsigned backtrace_collect(uint64_t rbp, uint64_t *out, unsigned max);
  * 0 it is printed first as the exact faulting instruction. */
 void backtrace_print(uint64_t rip, uint64_t rbp);
 
+/* Print return addresses collected earlier (backtrace_collect). */
+void backtrace_print_list(const uint64_t *rets, unsigned n);
+
 /* Print the call trace of the caller of this function. */
 void backtrace_print_here(void);
 

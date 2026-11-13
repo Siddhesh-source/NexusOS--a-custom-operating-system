@@ -44,6 +44,11 @@ void idt_init(void)
     serial_puts("[idt] IDT initialized.\n");
 }
 
+void idt_load(void)
+{
+    idt_flush((uint64_t)&idt_ptr);
+}
+
 void idt_flush(uint64_t ptr)
 {
     __asm__ volatile("lidt (%0)" : : "r"(ptr));

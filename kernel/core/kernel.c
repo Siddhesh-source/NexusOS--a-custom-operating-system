@@ -23,6 +23,10 @@
 #include "vm_test.h"
 #include "kprintf.h"
 #include "cpu.h"
+#include "percpu.h"
+#include "ipi.h"
+#include "smp.h"
+#include "smp_test.h"
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -62,6 +66,11 @@ volatile struct limine_memmap_request memmap_request = {
 __attribute__((used, section(".limine_reqs")))
 volatile struct limine_rsdp_request rsdp_request = {
     .id = LIMINE_RSDP_REQUEST_ID, .revision = 0,
+};
+
+__attribute__((used, section(".limine_reqs")))
+volatile struct limine_mp_request mp_request = {
+    .id = LIMINE_MP_REQUEST_ID, .revision = 0, .flags = 0,   /* xAPIC mode */
 };
 
 __attribute__((used, section(".limine_reqs_end")))
@@ -142,6 +151,8 @@ __attribute__((noinline)) static void run_fault_demo(void)
     debug_demo_use_after_free();
 #elif defined(BHARAT_FAULT_DEMO_OVERFLOW)
     debug_demo_heap_overflow();
+#elif defined(BHARAT_FAULT_DEMO_LOCKORDER)
+    smp_demo_lock_inversion();
 #endif
 }
 
@@ -160,12 +171,14 @@ static void start_screen_console(void)
 
 void kernel_main(void)
 {
+    /* Per-CPU data first: locks and the console need cpu_id(). */
+    percpu_init_boot();
     serial_init();
     start_screen_console();
 
     serial_puts("\n============================================\n");
     serial_puts("           B H A R A T   O S\n");
-    serial_puts("  Phase 7-8: Hardware and Memory\n");
+    serial_puts("  Phase 9: Multi-core\n");
     serial_puts("============================================\n\n");
 
     serial_puts("[boot] CPU entered long mode (64-bit).\n");
@@ -235,6 +248,7 @@ void kernel_main(void)
      * one-shot alarm instead of a periodic tick. */
     if (!apic_init())
         panic("this machine has no APIC described by ACPI; BharatOS needs one");
+    ipi_init();
     clock_init(sched_timer_event);
 
     /* Phase 5: preemptive scheduling. The boot flow (TID 0) is already the
@@ -242,6 +256,14 @@ void kernel_main(void)
      * other thread. */
     sched_init();
     sched_start();
+
+    /* Phase 9: wake the other CPUs. They idle until there is work for
+     * them. The Phase 5-8 tests below check single-CPU behaviour (exact
+     * round-robin order, one queue's fairness), so work stealing stays
+     * off until the multi-core tests turn it on: their threads all stay
+     * on this CPU while the others are online and idle. */
+    smp_init((void *)mp_request.response);
+
     bool sched_ok = sched_run_tests();
 
     /* Phase 6: debugging and hardening tools. They are active from boot;
@@ -253,6 +275,10 @@ void kernel_main(void)
 
     /* Phase 8: buddy allocator, slab caches, demand paging, copy-on-write. */
     bool vm_ok = vm_run_tests();
+
+    /* Phase 9: multi-core (locks, lock order, IPIs, TLB shootdown, RCU,
+     * per-CPU queues with work stealing). */
+    bool smp_ok = smp_run_tests();
 
     serial_puts("\n[ok] Kernel started successfully.\n");
     if (mm_ok)
@@ -279,9 +305,16 @@ void kernel_main(void)
         serial_puts("[ok] Phase 8 memory that scales verified.\n");
     else
         serial_puts("[FAIL] Phase 8 memory tests reported failures.\n");
+    if (smp_ok)
+        serial_puts("[ok] Phase 9 multi-core verified.\n");
+    else
+        serial_puts("[FAIL] Phase 9 multi-core tests reported failures.\n");
 
     bench_run();          /* only does something in the bench build */
     run_fault_demo();
+
+    /* From here on every CPU shares the work. */
+    sched_set_stealing(true);
 
     /* Heartbeat: a dot per second. kmain sleeps in between, so the idle
      * thread (not this loop) is what halts the CPU. */

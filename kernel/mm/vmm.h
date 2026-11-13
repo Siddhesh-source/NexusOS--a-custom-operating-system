@@ -16,7 +16,12 @@
  * Page frames come from the PMM; the VMM never owns the frames it maps,
  * only the page-table pages it allocates.
  *
- * Not SMP-safe; single-core kernel code only for now. */
+ * Multi-core: the page tables are guarded by one spinlock. Removing a
+ * mapping or a permission sends a TLB shootdown to the other CPUs that
+ * may have it cached (all CPUs for kernel addresses, only those with the
+ * space loaded for user addresses; see `cpus`) and waits for them.
+ *
+ * Limits: one shootdown IPI round per page (no batching yet). */
 
 #include "mm.h"
 
@@ -42,6 +47,7 @@ struct vm_region;
 typedef struct address_space {
     uint64_t pml4_phys;
     struct vm_region *regions;   /* user-half regions (vm.c), by address */
+    volatile uint32_t cpus;      /* bit mask of CPUs with it in CR3 */
 } address_space_t;
 
 /* Build the kernel page tables from the boot memory map and switch to them. */
@@ -53,6 +59,13 @@ address_space_t *vmm_current_space(void);
 vmm_status_t vmm_map_page(address_space_t *as, uint64_t virt, uint64_t phys, uint32_t flags);
 vmm_status_t vmm_unmap_page(address_space_t *as, uint64_t virt, uint64_t *old_phys);
 vmm_status_t vmm_translate(address_space_t *as, uint64_t virt, uint64_t *phys);
+
+/* Lock-free translation of a kernel-half address (for call traces and
+ * the lock checker, which must not take the page-table lock). */
+vmm_status_t vmm_translate_kernel(uint64_t virt, uint64_t *phys);
+
+/* TLB shootdowns sent to other CPUs so far. */
+uint64_t vmm_shootdown_count(void);
 vmm_status_t vmm_get_flags(address_space_t *as, uint64_t virt, uint32_t *flags);
 vmm_status_t vmm_protect_page(address_space_t *as, uint64_t virt, uint32_t flags);
 

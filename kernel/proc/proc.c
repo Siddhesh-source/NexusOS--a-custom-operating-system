@@ -9,6 +9,10 @@
 #include "trace.h"
 #include "slab.h"
 #include "vm.h"
+#include "percpu.h"
+#include "spinlock.h"
+#include "rcu.h"
+#include "ipi.h"
 
 /* Threads and processes come from their own slab caches (Phase 8):
  * fixed-size objects, no heap search, no fragmentation. */
@@ -25,18 +29,21 @@ extern char __text_start[], __text_end[];
 /* Called from thread_trampoline (context.asm) on a new thread's first run. */
 void thread_bootstrap(struct thread *t) __attribute__((noreturn));
 
+/* Guarded by proc_lock. Readers that only look things up go without
+ * it, as RCU readers (see proc.h). */
 static struct process *proc_table[PROC_MAX];
 static struct thread *thread_table[THREAD_MAX];
 static unsigned nproc, nthread;
 static pid_t next_pid;
 static tid_t next_tid;
+static struct spinlock proc_lock = SPINLOCK_INIT(LOCK_CLASS_PROC);
 
 /* The kernel process and the adopted boot flow live in .bss, not the heap,
  * and are never destroyed. */
 static struct process kernel_proc;
 static struct thread boot_thread;
 
-static struct thread *current;
+/* The running thread on this CPU is percpu_current() (percpu.h). */
 
 /* ---- helpers ------------------------------------------------------------ */
 
@@ -64,22 +71,39 @@ static bool process_valid(const struct process *p)
 {
     if (p == NULL)
         return false;
+    bool ok = false;
+    uint64_t f = rcu_read_lock();
     for (unsigned i = 0; i < PROC_MAX; i++) {
-        if (proc_table[i] == p)
-            return p->magic == PROCESS_MAGIC;
+        if (rcu_dereference(proc_table[i]) == p) {
+            ok = p->magic == PROCESS_MAGIC;
+            break;
+        }
     }
-    return false;
+    rcu_read_unlock(f);
+    return ok;
 }
 
 static bool thread_valid(const struct thread *t)
 {
     if (t == NULL)
         return false;
+    bool ok = false;
+    uint64_t f = rcu_read_lock();
     for (unsigned i = 0; i < THREAD_MAX; i++) {
-        if (thread_table[i] == t)
-            return t->magic == THREAD_MAGIC;
+        if (rcu_dereference(thread_table[i]) == t) {
+            ok = t->magic == THREAD_MAGIC;
+            break;
+        }
     }
-    return false;
+    rcu_read_unlock(f);
+    return ok;
+}
+
+/* Is `t` the thread running on its CPU right now? (t's run-queue lock
+ * held, so the answer cannot change underneath.) */
+static bool running_somewhere(const struct thread *t)
+{
+    return cpu_at(t->cpu)->current == t;
 }
 
 static bool transition_allowed(task_state_t from, task_state_t to)
@@ -95,9 +119,19 @@ static bool transition_allowed(task_state_t from, task_state_t to)
 }
 
 /* A process's state summarises its threads. Once every thread has
- * terminated, the process is TERMINATED for good. */
+ * terminated, the process is TERMINATED for good. Called with a thread's
+ * run-queue lock held; takes proc_lock (order: run queue, then process
+ * table). The other threads' states are read without their locks: every
+ * change runs this again afterwards, so the last update sees the final
+ * states. */
 static void process_update_state(struct process *p)
 {
+    /* The kernel process always has kmain RUNNING; its summary never
+     * changes, and every switch between kernel threads comes here, so
+     * skip it rather than take a global lock on each switch. */
+    if (p == &kernel_proc)
+        return;
+    SPIN_GUARD(&proc_lock);
     if (p->state == TASK_TERMINATED || p->threads == NULL)
         return;
     bool running = false, ready = false, blocked = false, fresh = false;
@@ -112,8 +146,8 @@ static void process_update_state(struct process *p)
 }
 
 /* Every thread state change goes through here, so the scheduler's queues
- * (ready queue = exactly the READY threads) can never drift out of sync.
- * Callers hold interrupts off. */
+ * (ready queues = exactly the READY threads) can never drift out of sync.
+ * Callers hold t's run-queue lock. */
 static proc_status_t set_state(struct thread *t, task_state_t to)
 {
     if (!transition_allowed(t->state, to)) {
@@ -157,23 +191,28 @@ static void validate_suspended(const struct thread *t)
         context_corrupt(t, "saved RFLAGS is malformed");
 }
 
+/* Table changes need proc_lock. The stores are atomic so lock-free
+ * readers see either the old or the new pointer. */
 static bool table_insert(void **table, unsigned size, void *obj)
 {
     for (unsigned i = 0; i < size; i++) {
         if (table[i] == NULL) {
-            table[i] = obj;
+            rcu_assign_pointer(table[i], obj);
             return true;
         }
     }
     return false;
 }
 
-static void table_remove(void **table, unsigned size, void *obj)
+static bool table_remove(void **table, unsigned size, void *obj)
 {
     for (unsigned i = 0; i < size; i++) {
-        if (table[i] == obj)
-            table[i] = NULL;
+        if (table[i] == obj) {
+            rcu_assign_pointer(table[i], NULL);
+            return true;
+        }
     }
+    return false;
 }
 
 /* ---- initialisation ----------------------------------------------------- */
@@ -203,6 +242,9 @@ void proc_init(void)
     boot_thread.stack.slot = -1;
     *(uint64_t *)boot_thread.stack.base = KSTACK_CANARY;
     boot_thread.state = TASK_RUNNING;
+    boot_thread.cpu = 0;
+    boot_thread.pinned = true;           /* kmain stays on the boot CPU */
+    boot_thread.ran_on = 1;
 
     kernel_proc.threads = &boot_thread;
     kernel_proc.thread_count = 1;
@@ -212,7 +254,7 @@ void proc_init(void)
     thread_table[0] = &boot_thread;
     nproc = nthread = 1;
     next_pid = next_tid = 1;
-    current = &boot_thread;
+    this_cpu()->current = &boot_thread;
 
     kprintf("[proc] Kernel process PID 0 created; boot flow adopted as TID 0 "
             "(stack %p - %p)\n", (void *)boot_thread.stack.base, (void *)boot_thread.stack.top);
@@ -242,11 +284,12 @@ struct process *process_create(const char *name, uint32_t flags, proc_status_t *
         p->as = vmm_kernel_space();
     }
 
-    uint64_t flags_irq = irq_save();
-    /* Re-check: with preemption, another thread may have filled the table
+    uint64_t flags_irq;
+    spin_lock_irqsave(&proc_lock, &flags_irq);
+    /* Re-check: another thread (or CPU) may have filled the table
      * between the early check and now. */
     if (!table_insert((void **)proc_table, PROC_MAX, p)) {
-        irq_restore(flags_irq);
+        spin_unlock_irqrestore(&proc_lock, flags_irq);
         if (p->owns_as)
             vmm_destroy_address_space(&p->own_as);
         slab_free(process_cache, p);
@@ -256,44 +299,64 @@ struct process *process_create(const char *name, uint32_t flags, proc_status_t *
     p->pid = next_pid++;
     p->state = TASK_NEW;
     copy_name(p->name, name);
-    p->parent = current->process->pid;
+    p->parent = percpu_current()->process->pid;
     nproc++;
-    irq_restore(flags_irq);
+    spin_unlock_irqrestore(&proc_lock, flags_irq);
 
     if (err != NULL)
         *err = PROC_OK;
     return p;
 }
 
+/* Terminate `t` (interrupts off). One running on another CPU is marked
+ * `kill` and that CPU is told to reschedule. */
+static void terminate_thread(struct thread *t)
+{
+    struct runqueue *rq = sched_lock_thread(t);
+    unsigned cpu = t->cpu;
+    bool remote = false;
+    if (t->state != TASK_TERMINATED) {
+        if (running_somewhere(t) && t != percpu_current()) {
+            t->kill = true;
+            remote = true;
+        } else if (set_state(t, TASK_TERMINATED) == PROC_OK) {   /* also leaves the lists */
+            t->exit_code = -1;
+        }
+    }
+    sched_unlock(rq);
+    if (remote)
+        ipi_reschedule(cpu);
+}
+
 proc_status_t process_terminate(struct process *p)
 {
     if (!process_valid(p))
         return PROC_ERR_INVALID;
-    if (p == current->process)
+    if (p == percpu_current()->process)
         return PROC_ERR_BUSY;
     if (p->state == TASK_TERMINATED)
         return PROC_ERR_BAD_STATE;
 
-    uint64_t flags = irq_save();
-    for (struct thread *t = p->threads; t != NULL; t = t->next_in_process) {
-        if (t->state != TASK_TERMINATED) {
-            set_state(t, TASK_TERMINATED);   /* also leaves ready/sleep lists */
-            t->exit_code = -1;
-        }
-    }
+    /* Interrupts off: an RCU read of the thread list, so no thread of it
+     * can be freed while we walk it. */
+    uint64_t flags = rcu_read_lock();
+    for (struct thread *t = rcu_dereference(p->threads); t != NULL;
+         t = rcu_dereference(t->next_in_process))
+        terminate_thread(t);
+    spin_lock(&proc_lock);
     p->state = TASK_TERMINATED;
-    irq_restore(flags);
+    spin_unlock(&proc_lock);
+    rcu_read_unlock(flags);
     return PROC_OK;
 }
 
-static void process_destroy(struct process *p)
+/* Free a process already removed from the table, after a grace period. */
+static void process_free(struct process *p)
 {
     if (p->owns_as) {
         vm_space_release(&p->own_as);     /* regions and their memory */
         vmm_destroy_address_space(&p->own_as);
     }
-    table_remove((void **)proc_table, PROC_MAX, p);
-    nproc--;
     p->magic = 0;
     slab_free(process_cache, p);
 }
@@ -330,7 +393,36 @@ static void init_context(struct thread *t)
 struct thread *thread_create(struct process *p, const char *name,
                              thread_entry_t entry, void *arg, proc_status_t *err)
 {
-    if (!process_valid(p) || entry == NULL)
+    return thread_create_on(p, name, entry, arg, THREAD_ANY_CPU, err);
+}
+
+/* Publish a new thread: table, its process's list, a TID. */
+static proc_status_t register_thread(struct process *p, struct thread *t)
+{
+    SPIN_GUARD(&proc_lock);
+    /* Re-validate atomically: while we were allocating (preemptible), the
+     * process may have been terminated or reaped, or the table filled. */
+    proc_status_t late = !process_valid(p) ? PROC_ERR_INVALID
+                       : p->state == TASK_TERMINATED ? PROC_ERR_BAD_STATE
+                       : !table_insert((void **)thread_table, THREAD_MAX, t) ? PROC_ERR_TABLE_FULL
+                       : PROC_OK;
+    if (late != PROC_OK)
+        return late;
+    t->tid = next_tid++;
+    struct thread **link = &p->threads;
+    while (*link != NULL)
+        link = &(*link)->next_in_process;
+    rcu_assign_pointer(*link, t);
+    p->thread_count++;
+    nthread++;
+    return PROC_OK;
+}
+
+struct thread *thread_create_on(struct process *p, const char *name, thread_entry_t entry,
+                                void *arg, unsigned cpu, proc_status_t *err)
+{
+    if (!process_valid(p) || entry == NULL
+        || (cpu != THREAD_ANY_CPU && (cpu_at(cpu) == NULL || !cpu_at(cpu)->online)))
         return fail(err, PROC_ERR_INVALID, "thread_create");
     if (p->state == TASK_TERMINATED)
         return fail(err, PROC_ERR_BAD_STATE, "thread_create (process terminated)");
@@ -354,41 +446,71 @@ struct thread *thread_create(struct process *p, const char *name,
     t->process = p;
     t->entry = entry;
     t->arg = arg;
-    t->exit_to = current->tid;
+    t->exit_to = percpu_current()->tid;
+    t->pinned = cpu != THREAD_ANY_CPU;
+    t->cpu = t->pinned ? cpu : sched_pick_cpu();
     init_context(t);
 
+    /* Interrupts stay off from publishing the thread until it is READY:
+     * that makes us an RCU reader, so even if its process is terminated
+     * and reaped meanwhile, `t` is not freed under us. */
     uint64_t flags = irq_save();
-    /* Re-validate atomically: while we were allocating (preemptible), the
-     * process may have been terminated or reaped, or the table filled. */
-    proc_status_t late = !process_valid(p) ? PROC_ERR_INVALID
-                       : p->state == TASK_TERMINATED ? PROC_ERR_BAD_STATE
-                       : !table_insert((void **)thread_table, THREAD_MAX, t) ? PROC_ERR_TABLE_FULL
-                       : PROC_OK;
+    proc_status_t late = register_thread(p, t);
     if (late != PROC_OK) {
         irq_restore(flags);
         kstack_free(&t->stack);
         slab_free(thread_cache, t);
         return fail(err, late, "thread_create");
     }
-    t->tid = next_tid++;
-    struct thread **link = &p->threads;
-    while (*link != NULL)
-        link = &(*link)->next_in_process;
-    *link = t;
-    p->thread_count++;
-    nthread++;
-    trace_event(TRACE_THREAD_CREATE, t->tid, p->pid);
-    set_state(t, TASK_READY);
+    tid_t tid = t->tid;
+    struct runqueue *rq = sched_lock_thread(t);
+    bool started = t->state == TASK_NEW && set_state(t, TASK_READY) == PROC_OK;
+    sched_unlock(rq);
     irq_restore(flags);
+    trace_event(TRACE_THREAD_CREATE, tid, p->pid);
+    if (!started)                         /* terminated before it could start */
+        return fail(err, PROC_ERR_BAD_STATE, "thread_create (process terminated)");
 
     if (err != NULL)
         *err = PROC_OK;
     return t;
 }
 
+struct thread *thread_create_idle(unsigned cpu)
+{
+    struct thread *t = slab_zalloc(thread_cache);
+    if (t == NULL)
+        return NULL;
+    if (kstack_alloc(&t->stack) != KSTACK_OK) {
+        slab_free(thread_cache, t);
+        return NULL;
+    }
+    t->magic = THREAD_MAGIC;
+    t->state = TASK_RUNNING;        /* the CPU starts on this stack */
+    char name[TASK_NAME_LEN] = "idle";
+    name[4] = (char)('0' + cpu / 10);
+    name[5] = (char)('0' + cpu % 10);
+    copy_name(t->name, name);
+    t->process = &kernel_proc;
+    t->cpu = cpu;
+    t->pinned = true;
+    t->flags = THREAD_IDLE;
+    t->ran_on = 1u << cpu;
+    uint64_t flags = irq_save();
+    proc_status_t st = register_thread(&kernel_proc, t);
+    irq_restore(flags);
+    if (st != PROC_OK) {
+        kstack_free(&t->stack);
+        slab_free(thread_cache, t);
+        return NULL;
+    }
+    return t;
+}
+
 void thread_bootstrap(struct thread *t)
 {
-    if (t != current || t->state != TASK_RUNNING)
+    sched_finish_switch();     /* second half of the switch that started us */
+    if (t != percpu_current() || t->state != TASK_RUNNING)
         context_corrupt(t, "new thread started while not the RUNNING current thread");
     __asm__ volatile("sti");
     thread_exit(t->entry(t->arg));
@@ -398,63 +520,92 @@ proc_status_t thread_terminate(struct thread *t)
 {
     if (!thread_valid(t))
         return PROC_ERR_INVALID;
-    if (t == current)
+    if (t == percpu_current())
         return PROC_ERR_BUSY;
 
     uint64_t flags = irq_save();
-    proc_status_t st = set_state(t, TASK_TERMINATED);
+    proc_status_t st = t->state == TASK_TERMINATED ? PROC_ERR_BAD_STATE : PROC_OK;
     if (st == PROC_OK)
-        t->exit_code = -1;
+        terminate_thread(t);
     irq_restore(flags);
     return st;
+}
+
+/* Can `t` be freed? TERMINATED and no longer running anywhere. Its
+ * run-queue lock makes the answer stable: a thread that exits holds that
+ * lock from marking itself TERMINATED until its registers are saved. */
+static bool finished(struct thread *t)
+{
+    struct runqueue *rq = sched_lock_thread(t);
+    bool done = t->state == TASK_TERMINATED && !running_somewhere(t);
+    sched_unlock(rq);
+    return done;
+}
+
+/* Remove a finished thread from the table and its process (proc_lock).
+ * Returns false if someone else already did. */
+static bool unregister_thread(struct thread *t)
+{
+    SPIN_GUARD(&proc_lock);
+    if (!table_remove((void **)thread_table, THREAD_MAX, t))
+        return false;
+    struct process *p = t->process;
+    for (struct thread **link = &p->threads; *link != NULL; link = &(*link)->next_in_process) {
+        if (*link == t) {
+            rcu_assign_pointer(*link, t->next_in_process);
+            break;
+        }
+    }
+    p->thread_count--;
+    nthread--;
+    return true;
+}
+
+/* Free an unregistered thread. Call after a grace period. */
+static void thread_free(struct thread *t)
+{
+    if (!kstack_canary_intact(&t->stack))
+        context_corrupt(t, "kernel stack canary overwritten before destroy");
+    kstack_free(&t->stack);
+    t->magic = 0;
+    slab_free(thread_cache, t);
 }
 
 proc_status_t thread_destroy(struct thread *t)
 {
     if (!thread_valid(t))
         return PROC_ERR_INVALID;
-    if (t == current || t == &boot_thread)
+    if (t == percpu_current() || t == &boot_thread || (t->flags & THREAD_IDLE))
         return PROC_ERR_BUSY;
-    if (t->state != TASK_TERMINATED)
-        return PROC_ERR_BAD_STATE;
-    if (!kstack_canary_intact(&t->stack))
-        context_corrupt(t, "kernel stack canary overwritten before destroy");
-
-    uint64_t flags = irq_save();
-    kstack_free(&t->stack);
-
-    struct process *p = t->process;
-    for (struct thread **link = &p->threads; *link != NULL; link = &(*link)->next_in_process) {
-        if (*link == t) {
-            *link = t->next_in_process;
-            break;
-        }
-    }
-    p->thread_count--;
-    table_remove((void **)thread_table, THREAD_MAX, t);
-    nthread--;
-    t->magic = 0;
-    slab_free(thread_cache, t);
-    irq_restore(flags);
+    uint64_t flags = rcu_read_lock();     /* t stays allocated while we look */
+    proc_status_t st = !finished(t) ? PROC_ERR_BAD_STATE
+                     : !unregister_thread(t) ? PROC_ERR_INVALID : PROC_OK;
+    rcu_read_unlock(flags);
+    if (st != PROC_OK)
+        return st;
+    rcu_synchronize();                    /* no lookup can still be reading it */
+    thread_free(t);
     return PROC_OK;
 }
 
 void thread_exit(int64_t code)
 {
     irq_save();   /* stays off; the next thread restores its own IF */
-    struct thread *t = current;
+    struct thread *t = percpu_current();
     if (t == &boot_thread)
         panic("thread_exit: the boot thread cannot exit");
 
     t->exit_code = code;
     trace_event(TRACE_THREAD_EXIT, t->tid, (uint64_t)code);
+    struct runqueue *rq = sched_lock_this_cpu();
     set_state(t, TASK_TERMINATED);
 
     /* With the scheduler running, it picks the next READY thread (or idle).
      * The TERMINATED thread is on no queue, so it can never be resumed;
-     * its stack stays intact until proc_reap runs on another thread. */
+     * its stack stays intact until proc_reap runs on another thread. The
+     * run-queue lock is held until the switch away is complete. */
     if (sched_active())
-        sched_reschedule();
+        sched_reschedule_locked(rq);
 
     /* Before the scheduler starts (Phase 4 tests): hand the CPU back to the
      * thread that created us, falling back to the boot thread, then to any
@@ -465,7 +616,7 @@ void thread_exit(int64_t code)
     if (next == NULL)
         panic("thread_exit: no READY thread to resume");
 
-    thread_switch(next);
+    thread_switch_to(next);
     panic("thread_exit: a TERMINATED thread was resumed");
 }
 
@@ -483,64 +634,117 @@ uint64_t proc_cache_pages(void)
     return t.slabs + p.slabs;
 }
 
+#define REAP_BATCH 32
+
+/* Reclaim finished threads and empty TERMINATED processes:
+ *   1. find candidates and unregister them (locks; interrupts off),
+ *   2. wait for a grace period, so no lock-free lookup still sees them,
+ *   3. free their memory. */
 unsigned proc_reap(void)
 {
     unsigned reaped = 0;
-    uint64_t flags = irq_save();
+    for (;;) {
+        struct thread *dead[REAP_BATCH];
+        struct process *gone[PROC_MAX];
+        unsigned nd = 0, ng = 0;
 
-    for (unsigned i = 0; i < THREAD_MAX; i++) {
-        struct thread *t = thread_table[i];
-        if (t != NULL && t != current && t->state == TASK_TERMINATED
-            && thread_destroy(t) == PROC_OK)
-            reaped++;
-    }
-    for (unsigned i = 0; i < PROC_MAX; i++) {
-        struct process *p = proc_table[i];
-        if (p != NULL && p != &kernel_proc && p->state == TASK_TERMINATED
-            && p->thread_count == 0)
-            process_destroy(p);
-    }
+        uint64_t flags = rcu_read_lock();
+        for (unsigned i = 0; i < THREAD_MAX && nd < REAP_BATCH; i++) {
+            struct thread *t = rcu_dereference(thread_table[i]);
+            if (t != NULL && t != &boot_thread && !(t->flags & THREAD_IDLE)
+                && t->state == TASK_TERMINATED && finished(t) && unregister_thread(t))
+                dead[nd++] = t;
+        }
+        spin_lock(&proc_lock);
+        for (unsigned i = 0; i < PROC_MAX; i++) {
+            struct process *p = proc_table[i];
+            if (p != NULL && p != &kernel_proc && p->state == TASK_TERMINATED
+                && p->thread_count == 0 && table_remove((void **)proc_table, PROC_MAX, p)) {
+                nproc--;
+                gone[ng++] = p;
+            }
+        }
+        spin_unlock(&proc_lock);
+        rcu_read_unlock(flags);
 
-    irq_restore(flags);
+        if (nd == 0 && ng == 0)
+            break;
+        rcu_synchronize();
+        for (unsigned i = 0; i < nd; i++)
+            thread_free(dead[i]);
+        for (unsigned i = 0; i < ng; i++)
+            process_free(gone[i]);
+        reaped += nd;
+        if (nd < REAP_BATCH)
+            break;
+    }
     return reaped;
 }
 
 /* ---- switching ---------------------------------------------------------- */
 
+void thread_switch_to(struct thread *next)
+{
+    struct thread *prev = percpu_current();
+    struct percpu *c = this_cpu();
+
+    if (!kstack_canary_intact(&prev->stack))
+        context_corrupt(prev, "outgoing thread's stack canary overwritten (stack overflow?)");
+    validate_suspended(next);
+
+    /* `next` becomes this CPU's current first, so the state hook queues
+     * `prev` (no longer running here) when it turns READY. */
+    c->current = next;
+    if (prev->state == TASK_RUNNING)
+        set_state(prev, TASK_READY);   /* else it blocked or exited itself */
+    else if (prev->state == TASK_READY)
+        sched_state_changed(prev, TASK_READY, TASK_READY);   /* made itself READY: queue it */
+    set_state(next, TASK_RUNNING);
+    next->switch_count++;
+    next->ran_on |= 1u << c->id;
+
+    if (next->process->as != c->space)
+        vmm_switch(next->process->as);
+
+    context_switch(&prev->saved_rsp, next->saved_rsp);
+
+    /* Some later switch resumed us (perhaps on another CPU); release the
+     * run-queue lock that switch took. */
+    sched_finish_switch();
+}
+
 proc_status_t thread_switch(struct thread *next)
 {
-    struct thread *prev = current;
+    struct thread *prev = percpu_current();
 
     if (!thread_valid(next)) {
         kprintf("[proc] thread_switch: invalid thread %p\n", (void *)next);
         return PROC_ERR_INVALID;
     }
-    if (next == prev || next->state != TASK_READY) {
+    if (next == prev || next->state != TASK_READY || (next->flags & THREAD_IDLE)) {
         kprintf("[proc] thread_switch: TID %u is %s, not a READY thread\n",
                 next->tid, next == prev ? "the current thread" : task_state_str(next->state));
         return PROC_ERR_BAD_STATE;
     }
 
     uint64_t flags = irq_save();
-
-    if (!kstack_canary_intact(&prev->stack))
-        context_corrupt(prev, "outgoing thread's stack canary overwritten (stack overflow?)");
-    validate_suspended(next);
-
-    if (prev->state == TASK_RUNNING)
-        set_state(prev, TASK_READY);   /* else it blocked or exited itself */
-    set_state(next, TASK_RUNNING);
-    next->switch_count++;
-
-    if (next->process->as != prev->process->as)
-        vmm_switch(next->process->as);
-    current = next;
-
-    context_switch(&prev->saved_rsp, next->saved_rsp);
+    struct runqueue *rq = sched_lock_this_cpu();
+    if (next->state != TASK_READY || next->cpu != cpu_id()) {
+        sched_unlock(rq);
+        irq_restore(flags);
+        kprintf("[proc] thread_switch: TID %u is not READY on this CPU\n", next->tid);
+        return PROC_ERR_BAD_STATE;
+    }
+    thread_switch_to(next);
 
     /* Some later thread_switch resumed us; `current` is prev again. */
     irq_restore(flags);
     return PROC_OK;
+}
+
+proc_status_t thread_set_state_locked(struct thread *t, task_state_t state)
+{
+    return set_state(t, state);
 }
 
 proc_status_t thread_set_state(struct thread *t, task_state_t state)
@@ -551,20 +755,33 @@ proc_status_t thread_set_state(struct thread *t, task_state_t state)
         kprintf("[proc] set_state: only thread_switch may make TID %u RUNNING\n", t->tid);
         return PROC_ERR_BAD_STATE;
     }
-    if (t == current && state == TASK_TERMINATED)
+    if (t == percpu_current() && state == TASK_TERMINATED)
         return PROC_ERR_BUSY;   /* use thread_exit */
 
     uint64_t flags = irq_save();
-    proc_status_t st = set_state(t, state);
+    struct runqueue *rq = sched_lock_thread(t);
+    proc_status_t st;
+    if (t != percpu_current() && running_somewhere(t))
+        st = PROC_ERR_BUSY;     /* running on another CPU right now */
+    else if (t == percpu_current() && state == TASK_READY && t->state == TASK_RUNNING)
+        st = PROC_OK;           /* already runnable */
+    else
+        st = set_state(t, state);
+    sched_unlock(rq);
     irq_restore(flags);
     return st;
 }
 
 const struct cpu_context *thread_get_context(const struct thread *t)
 {
-    if (!thread_valid(t) || t == current || !saved_rsp_in_bounds(t))
+    if (!thread_valid(t) || t == percpu_current())
         return NULL;
-    return (const struct cpu_context *)t->saved_rsp;
+    uint64_t flags = irq_save();
+    struct runqueue *rq = sched_lock_thread((struct thread *)t);
+    bool usable = !running_somewhere(t) && saved_rsp_in_bounds(t);
+    sched_unlock(rq);
+    irq_restore(flags);
+    return usable ? (const struct cpu_context *)t->saved_rsp : NULL;
 }
 
 struct thread *thread_next_ready(const struct thread *after)
@@ -577,7 +794,7 @@ struct thread *thread_next_ready(const struct thread *after)
         }
     }
     for (unsigned n = 0; n < THREAD_MAX; n++) {
-        struct thread *t = thread_table[(start + n) % THREAD_MAX];
+        struct thread *t = rcu_dereference(thread_table[(start + n) % THREAD_MAX]);
         if (t != NULL && t->state == TASK_READY)
             return t;
     }
@@ -586,38 +803,46 @@ struct thread *thread_next_ready(const struct thread *after)
 
 /* ---- registry ----------------------------------------------------------- */
 
-struct thread *thread_current(void)   { return current; }
-struct process *process_current(void) { return current->process; }
+struct thread *thread_current(void)   { return percpu_current(); }
+struct process *process_current(void) { return percpu_current()->process; }
 struct process *process_kernel(void)  { return &kernel_proc; }
 unsigned process_count(void)          { return nproc; }
 unsigned thread_count(void)           { return nthread; }
 
 struct process *process_at(unsigned slot)
 {
-    return slot < PROC_MAX ? proc_table[slot] : NULL;
+    return slot < PROC_MAX ? rcu_dereference(proc_table[slot]) : NULL;
 }
 
 struct thread *thread_at(unsigned slot)
 {
-    return slot < THREAD_MAX ? thread_table[slot] : NULL;
+    return slot < THREAD_MAX ? rcu_dereference(thread_table[slot]) : NULL;
 }
 
 struct process *process_find(pid_t pid)
 {
-    for (unsigned i = 0; i < PROC_MAX; i++) {
-        if (proc_table[i] != NULL && proc_table[i]->pid == pid)
-            return proc_table[i];
+    struct process *found = NULL;
+    uint64_t f = rcu_read_lock();
+    for (unsigned i = 0; i < PROC_MAX && found == NULL; i++) {
+        struct process *p = rcu_dereference(proc_table[i]);
+        if (p != NULL && p->pid == pid)
+            found = p;
     }
-    return NULL;
+    rcu_read_unlock(f);
+    return found;
 }
 
 struct thread *thread_find(tid_t tid)
 {
-    for (unsigned i = 0; i < THREAD_MAX; i++) {
-        if (thread_table[i] != NULL && thread_table[i]->tid == tid)
-            return thread_table[i];
+    struct thread *found = NULL;
+    uint64_t f = rcu_read_lock();
+    for (unsigned i = 0; i < THREAD_MAX && found == NULL; i++) {
+        struct thread *t = rcu_dereference(thread_table[i]);
+        if (t != NULL && t->tid == tid)
+            found = t;
     }
-    return NULL;
+    rcu_read_unlock(f);
+    return found;
 }
 
 /* ---- diagnostics -------------------------------------------------------- */
@@ -625,7 +850,7 @@ struct thread *thread_find(tid_t tid)
 /* Live rsp/rip for the running thread; saved values for a suspended one. */
 static void thread_regs(const struct thread *t, uint64_t *rsp, uint64_t *rip)
 {
-    if (t == current) {
+    if (t == percpu_current()) {
         __asm__ volatile("mov %%rsp, %0" : "=r"(*rsp));
         __asm__ volatile("lea 0(%%rip), %0" : "=r"(*rip));
     } else if (saved_rsp_in_bounds(t)) {
@@ -649,9 +874,9 @@ void thread_dump(const struct thread *t)
             (void *)t->stack.base, (void *)t->stack.top,
             (t->stack.top - t->stack.base) / 1024, kstack_high_water(&t->stack),
             kstack_canary_intact(&t->stack) ? "intact" : "SMASHED");
-    kprintf("  RSP      : %p%s\n", (void *)rsp, t == current ? " (live)" : " (saved)");
+    kprintf("  RSP      : %p%s\n", (void *)rsp, t == percpu_current() ? " (live)" : " (saved)");
     kprintf("  RIP      : %p%s\n", (void *)rip,
-            t == current ? " (live)" : rip ? " (saved return address)" : " (unreadable)");
+            t == percpu_current() ? " (live)" : rip ? " (saved return address)" : " (unreadable)");
     kprintf("  ADDR SPC : PML4 %p (%s)\n", (void *)t->process->as->pml4_phys,
             t->process->owns_as ? "own address space" : "kernel address space");
     kprintf("  SWITCHES : %lu\n", t->switch_count);

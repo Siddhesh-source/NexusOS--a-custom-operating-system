@@ -13,8 +13,8 @@
  * Addresses come from ACPI's MADT. Device lines are numbered by "global
  * system interrupt" (GSI); acpi_irq_to_gsi() maps old ISA IRQ numbers.
  *
- * Limits: xAPIC (memory-mapped) mode only, not x2APIC; interrupts go to
- * the boot CPU. */
+ * Limits: xAPIC (memory-mapped) mode only, not x2APIC; device interrupts
+ * go to the boot CPU. */
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -24,6 +24,13 @@
 /* Mask the 8259 PICs and turn on the local APIC and every I/O APIC (with
  * all their lines masked). Returns false if ACPI did not describe them. */
 bool apic_init(void);
+
+/* Turn on the calling CPU's local APIC (apic_init does the boot CPU). */
+void apic_init_cpu(void);
+
+/* Send an inter-processor interrupt: `command` is the low word of the
+ * interrupt command register (vector | delivery mode | shorthand). */
+void lapic_send_ipi(uint32_t apic_id, uint32_t command);
 
 void lapic_eoi(void);
 uint32_t lapic_id(void);

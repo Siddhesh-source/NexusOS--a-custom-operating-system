@@ -17,12 +17,14 @@
 #include "proc.h"
 #include "kprintf.h"
 #include "string.h"
+#include "percpu.h"
 
 #define NTHREADS 12           /* test threads besides boot and idle */
 #define RANDOM_OPS 50000
 
 static struct thread threads[NTHREADS + 2];   /* [0] boot, [1] idle */
-static struct thread *current;
+/* The running thread lives where sched.c looks for it: CPU 0's record. */
+#define current (unit_cpus[0].current)
 static unsigned created;
 static struct process kernel_proc;
 
@@ -88,18 +90,27 @@ proc_status_t thread_set_state(struct thread *t, task_state_t state)
     return PROC_OK;
 }
 
-proc_status_t thread_switch(struct thread *next)
+proc_status_t thread_set_state_locked(struct thread *t, task_state_t state)
+{
+    return thread_set_state(t, state);
+}
+
+/* Like the real one: `next` becomes current first, so the outgoing thread
+ * (no longer running) is queued when it turns READY; then the second half
+ * of the switch (which releases the run-queue lock in the kernel). */
+void thread_switch_to(struct thread *next)
 {
     if (next->state != TASK_READY) {
         UCHECK(0, "thread_switch to TID %u in state %s", next->tid, task_state_str(next->state));
-        return PROC_ERR_BAD_STATE;
+        return;
     }
-    if (current->state == TASK_RUNNING)
-        thread_set_state(current, TASK_READY);
+    struct thread *prev = current;
+    current = next;
+    if (prev->state == TASK_RUNNING)
+        thread_set_state(prev, TASK_READY);
     thread_set_state(next, TASK_RUNNING);
     next->switch_count++;
-    current = next;
-    return PROC_OK;
+    sched_finish_switch();
 }
 
 static void init_thread(struct thread *t, unsigned slot, const char *name)
@@ -119,11 +130,12 @@ static struct thread *new_thread(const char *name)
     return t;
 }
 
-struct thread *thread_create(struct process *p, const char *name, thread_entry_t entry,
-                             void *arg, proc_status_t *err)
+struct thread *thread_create_on(struct process *p, const char *name, thread_entry_t entry,
+                                void *arg, unsigned cpu, proc_status_t *err)
 {
     (void)p; (void)entry; (void)arg; (void)err;
     struct thread *t = new_thread(name);
+    t->pinned = cpu != THREAD_ANY_CPU;
     thread_set_state(t, TASK_READY);
     return t;
 }
@@ -153,7 +165,7 @@ static struct thread *spawn(void)
 static void exit_current(void)
 {
     thread_set_state(current, TASK_TERMINATED);
-    sched_reschedule();
+    sched_reschedule_locked(sched_lock_this_cpu());
 }
 
 /* TID 0 is the running boot flow; sched_init creates idle as TID 1. */

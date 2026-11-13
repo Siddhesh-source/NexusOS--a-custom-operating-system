@@ -45,9 +45,8 @@ static bool frame_readable(uint64_t addr)
     if (addr < KERNEL_HALF_BASE)
         return false;
     uint64_t phys;
-    address_space_t *ks = vmm_kernel_space();
-    return vmm_translate(ks, addr, &phys) == VMM_OK
-        && vmm_translate(ks, addr + 15, &phys) == VMM_OK;
+    return vmm_translate_kernel(addr, &phys) == VMM_OK
+        && vmm_translate_kernel(addr + 15, &phys) == VMM_OK;
 }
 
 unsigned backtrace_collect(uint64_t rbp, uint64_t *out, unsigned max)
@@ -76,6 +75,15 @@ static void print_line(unsigned idx, uint64_t addr, uint64_t lookup_addr)
         kprintf("  #%u %p  %s+0x%lx\n", idx, (void *)addr, s->name, addr - s->addr);
     else
         kprintf("  #%u %p  ?\n", idx, (void *)addr);
+}
+
+void backtrace_print_list(const uint64_t *rets, unsigned n)
+{
+    kprintf("Call trace (most recent call first):\n");
+    for (unsigned i = 0; i < n; i++)
+        print_line(i, rets[i], rets[i] - 1);
+    if (n == 0)
+        kprintf("  (no readable frames)\n");
 }
 
 void backtrace_print(uint64_t rip, uint64_t rbp)

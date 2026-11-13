@@ -76,6 +76,8 @@ struct idt_ptr {
 #define CP_VECTOR     21  /* Control Protection Exception */
 
 void idt_init(void);
+/* Load the (shared) IDT on another CPU. */
+void idt_load(void);
 void idt_set_gate(uint8_t num, uint64_t base, uint16_t sel, uint8_t ist, uint8_t flags);
 void idt_flush(uint64_t);
 

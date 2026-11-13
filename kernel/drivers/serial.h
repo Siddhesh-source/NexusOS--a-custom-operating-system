@@ -16,6 +16,13 @@ void serial_puts(const char *s);
 void serial_write(const char *buf, uint64_t n);
 void serial_put_hex(uint64_t value);
 
+/* The console lock (serial and screen): keeps each line in one piece when
+ * several CPUs print. The holder may take it again. Interrupts are off
+ * while it is held; pass the result to console_unlock. serial_puts,
+ * serial_write and kprintf take it themselves. */
+uint64_t console_lock(void);
+void console_unlock(uint64_t flags);
+
 /* Send a copy of every byte written to the serial port to `fn` as well
  * (used by the screen console). NULL turns it off. */
 void serial_set_mirror(void (*fn)(char c));

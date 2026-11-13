@@ -20,6 +20,7 @@
 #include "proc.h"
 #include "sched.h"
 #include "trace.h"
+#include "percpu.h"
 
 #define ROUNDS 5
 
@@ -67,6 +68,82 @@ static void bench_context_switch(void)
     while (!partner_done)
         sched_yield();
     kprintf("[bench] context_switch: %lu cycles/op\n", min);
+}
+
+/* ---- context switch on every CPU at once --------------------------------- */
+
+/* Per CPU, two threads pinned there yield to each other, all CPUs at the
+ * same time. Each CPU has its own run queue and lock, so the cost per
+ * switch should stay close to the one-CPU number: that is what "scales
+ * per CPU" means. Reported: the average over CPUs. */
+struct pair {
+    volatile bool stop, done_a, done_b;
+    volatile uint64_t cycles;
+};
+
+static struct pair pairs[SMP_MAX_CPUS];
+
+static int64_t pair_partner(void *arg)
+{
+    struct pair *p = arg;
+    while (!p->stop)
+        sched_yield();
+    p->done_b = true;
+    return 0;
+}
+
+static int64_t pair_timer(void *arg)
+{
+    struct pair *p = arg;
+    sched_yield();                         /* let the partner start */
+    uint64_t min = ~0ULL;
+    for (int r = 0; r < ROUNDS; r++) {
+        uint64_t t0 = rdtsc();
+        for (int i = 0; i < SWITCH_ITERS; i++)
+            sched_yield();
+        min = best(min, (rdtsc() - t0) / (2 * SWITCH_ITERS));
+    }
+    p->cycles = min;
+    p->stop = true;
+    p->done_a = true;
+    return 0;
+}
+
+static void bench_context_switch_parallel(void)
+{
+    unsigned n = 0;
+    for (unsigned c = 0; c < SMP_MAX_CPUS; c++) {
+        struct pair *p = &pairs[c];
+        p->stop = false;
+        p->done_a = p->done_b = true;
+        p->cycles = 0;
+        if (!cpu_at(c)->online)
+            continue;
+        p->done_a = p->done_b = false;
+        if (thread_create_on(process_kernel(), "bench-b", pair_partner, p, c, NULL) == NULL
+            || thread_create_on(process_kernel(), "bench-a", pair_timer, p, c, NULL) == NULL) {
+            kprintf("[bench] cannot create the threads for CPU %u\n", c);
+            p->stop = p->done_a = p->done_b = true;
+            continue;
+        }
+        n++;
+    }
+    for (;;) {
+        bool all = true;
+        for (unsigned c = 0; c < SMP_MAX_CPUS; c++)
+            all &= pairs[c].done_a && pairs[c].done_b;
+        if (all)
+            break;
+        sched_sleep(1);
+    }
+    uint64_t sum = 0, worst = 0;
+    for (unsigned c = 0; c < SMP_MAX_CPUS; c++) {
+        sum += pairs[c].cycles;
+        worst = pairs[c].cycles > worst ? pairs[c].cycles : worst;
+    }
+    kprintf("[bench] %u CPUs switching at once: average %lu, slowest CPU %lu cycles/switch\n",
+            n, n ? sum / n : 0, worst);
+    kprintf("[bench] context_switch_par: %lu cycles/op\n", n ? sum / n : 0);
 }
 
 /* ---- heap --------------------------------------------------------------- */
@@ -151,6 +228,7 @@ void bench_run(void)
 {
     kprintf("\n===== Benchmarks (TSC cycles, best of %d rounds) =====\n", ROUNDS);
     bench_context_switch();
+    bench_context_switch_parallel();
     bench_heap("kmalloc_kfree_64", 64);
     bench_heap("kmalloc_kfree_4096", 4096);
     bench_pmm();

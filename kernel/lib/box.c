@@ -5,12 +5,13 @@
 
 static void rule(const char *left, const char *right)
 {
-    IRQ_GUARD();   /* whole line in one uninterrupted write */
+    uint64_t flags = console_lock();   /* whole line in one write */
     serial_puts(left);
     for (int i = 0; i < BOX_INNER_WIDTH + 2; i++)
         serial_puts("═");
     serial_puts(right);
     serial_puts("\n");
+    console_unlock(flags);
 }
 
 void box_top(void)       { rule("╔", "╗"); }
@@ -35,7 +36,6 @@ static int columns(const char *s, int *bytes_for_width)
 
 void box_line(const char *fmt, ...)
 {
-    IRQ_GUARD();   /* whole line in one uninterrupted write */
     char text[256];
     va_list ap;
     va_start(ap, fmt);
@@ -44,9 +44,11 @@ void box_line(const char *fmt, ...)
 
     int bytes;
     int cols = columns(text, &bytes);
+    uint64_t flags = console_lock();   /* whole line in one write */
     serial_puts("║ ");
     serial_write(text, (uint64_t)bytes);
     for (int i = cols; i < BOX_INNER_WIDTH; i++)
         serial_putchar(' ');
     serial_puts(" ║\n");
+    console_unlock(flags);
 }

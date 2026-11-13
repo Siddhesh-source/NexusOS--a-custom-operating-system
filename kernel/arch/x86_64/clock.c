@@ -7,6 +7,7 @@
 #include "kprintf.h"
 #include "panic.h"
 #include "trace.h"
+#include "percpu.h"
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -28,10 +29,16 @@ static uint64_t tsc_hz, apic_hz;
  * keeps it exact enough and never overflows. */
 static uint64_t ns_mult, count_mult;
 static const char *reference = "none";
-static uint64_t alarms_set, alarms_fired, alarms_early;
-static uint64_t alarm_deadline;          /* deadline of the pending alarm */
-static uint64_t last_late_ns, max_late_ns;  /* interrupt arrival vs deadline */
 static void (*alarm_handler)(void);
+
+/* Each CPU has its own APIC timer, so its own alarm. Only that CPU
+ * touches its entry (with interrupts off): no lock. */
+struct alarm_state {
+    uint64_t set, fired, early;
+    uint64_t deadline;                   /* deadline of the pending alarm */
+    uint64_t last_late_ns, max_late_ns;  /* interrupt arrival vs deadline */
+} __attribute__((aligned(64)));
+static struct alarm_state alarms[SMP_MAX_CPUS];
 static volatile uint64_t *hpet_regs;
 static uint64_t hpet_period_fs;
 
@@ -129,15 +136,16 @@ static bool calibrate_pit(uint64_t *ns, uint64_t *cycles, uint64_t *counts)
 static void timer_interrupt(struct interrupt_frame *frame)
 {
     (void)frame;
-    alarms_fired++;
+    struct alarm_state *a = &alarms[cpu_id()];
+    a->fired++;
     uint64_t now = clock_now_ns();
-    trace_event(TRACE_ALARM_FIRE, alarm_deadline, now);
-    if (now + 50000 < alarm_deadline) {
-        alarms_early++;
+    trace_event(TRACE_ALARM_FIRE, a->deadline, now);
+    if (now + 50000 < a->deadline) {
+        a->early++;
     } else {
-        last_late_ns = now > alarm_deadline ? now - alarm_deadline : 0;
-        if (last_late_ns > max_late_ns)
-            max_late_ns = last_late_ns;
+        a->last_late_ns = now > a->deadline ? now - a->deadline : 0;
+        if (a->last_late_ns > a->max_late_ns)
+            a->max_late_ns = a->last_late_ns;
     }
     /* End-of-interrupt first: the handler may switch threads and not come
      * back here until this thread runs again. */
@@ -156,8 +164,9 @@ void clock_set_alarm(uint64_t deadline_ns)
         count = 1;
     if (count > 0xFFFFFFFFULL)
         count = 0xFFFFFFFFULL;                   /* fires early; caller re-arms */
-    alarms_set++;
-    alarm_deadline = deadline_ns;
+    struct alarm_state *a = &alarms[cpu_id()];
+    a->set++;
+    a->deadline = deadline_ns;
     trace_event(TRACE_ALARM_SET, deadline_ns, now);
     lapic_write(LAPIC_LVT_TIMER, CLOCK_TIMER_VECTOR);   /* one-shot, unmasked */
     lapic_write(LAPIC_TIMER_INIT, (uint32_t)count);
@@ -196,6 +205,14 @@ void clock_init(void (*on_alarm)(void))
             apic_hz / 1000000, (apic_hz / 1000) % 1000, CLOCK_TIMER_VECTOR);
 }
 
+void clock_init_cpu(void)
+{
+    /* Same rate as the boot CPU's timer (one crystal feeds them all). */
+    lapic_write(LAPIC_TIMER_DIV, 0x3);                 /* divide by 16 */
+    lapic_write(LAPIC_TIMER_INIT, 0);
+    lapic_write(LAPIC_LVT_TIMER, LAPIC_LVT_MASKED | CLOCK_TIMER_VECTOR);
+}
+
 uint64_t clock_hpet_ns(void)
 {
     if (hpet_regs == NULL)
@@ -208,13 +225,21 @@ uint64_t clock_hpet_ns(void)
 
 void clock_get_info(struct clock_info *out)
 {
-    IRQ_GUARD();
+    /* Totals over all CPUs; "last late" is this CPU's. Other CPUs' counts
+     * are read without a lock: a snapshot, possibly a moment old. */
     out->reference = reference;
     out->tsc_hz = tsc_hz;
     out->apic_timer_hz = apic_hz;
-    out->alarms_set = alarms_set;
-    out->alarms_fired = alarms_fired;
-    out->alarms_early = alarms_early;
-    out->last_late_ns = last_late_ns;
-    out->max_late_ns = max_late_ns;
+    out->alarms_set = out->alarms_fired = out->alarms_early = 0;
+    out->max_late_ns = 0;
+    for (unsigned c = 0; c < SMP_MAX_CPUS; c++) {
+        const struct alarm_state *a = &alarms[c];
+        out->alarms_set += a->set;
+        out->alarms_fired += a->fired;
+        out->alarms_early += a->early;
+        if (a->max_late_ns > out->max_late_ns)
+            out->max_late_ns = a->max_late_ns;
+    }
+    IRQ_GUARD();
+    out->last_late_ns = alarms[cpu_id()].last_late_ns;
 }
