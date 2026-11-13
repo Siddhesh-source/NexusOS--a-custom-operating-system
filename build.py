@@ -141,7 +141,11 @@ def object_for(src: Path) -> Path:
 
 # Opt-in fatal exception demos (see run_fault_demo() in kernel.c).
 FAULT_DEMOS = ["pf", "null", "stack", "de", "ud", "df", "ctx", "tstack",
-               "panic", "smash", "uaf", "overflow"]
+               "panic", "smash", "uaf", "overflow", "lockorder"]
+
+# CPUs QEMU gives the kernel; `--smp N` changes it for run/test/debug/bench.
+DEFAULT_SMP = 4
+SMP = DEFAULT_SMP
 
 
 def build_kernel(fault_demo: str | None = None, bench: bool = False) -> Path:
@@ -224,7 +228,7 @@ def find_ovmf() -> tuple[Path | None, Path | None]:
 
 
 def run_qemu(image: Path, *, uefi: bool = False) -> int:
-    cmd = [TOOLS["qemu"], "-m", "512M",
+    cmd = [TOOLS["qemu"], "-m", "512M", "-smp", str(SMP),
            "-drive", f"file={image},format=raw,media=disk,if=ide",
            "-no-reboot", "-no-shutdown"]
     if not uefi:
@@ -240,7 +244,7 @@ def run_qemu(image: Path, *, uefi: bool = False) -> int:
         else:
             print("[WARN] no OVMF found; falling back to BIOS")
             cmd += ["-nographic"]
-    print(f"[qemu] {'UEFI' if uefi else 'BIOS'}")
+    print(f"[qemu] {'UEFI' if uefi else 'BIOS'}, {SMP} CPU(s)")
     return run(cmd, check=False)
 
 
@@ -253,7 +257,7 @@ def run_debug(image: Path) -> int:
     print(f"          lldb {KERNEL_ELF.relative_to(ROOT).as_posix()} "
           "-o \"gdb-remote 1234\" -o \"breakpoint set -n kernel_main\" -o continue")
     print("[debug] Serial output appears here. Quit QEMU: Ctrl+A then X.", flush=True)
-    cmd = [TOOLS["qemu"], "-m", "512M",
+    cmd = [TOOLS["qemu"], "-m", "512M", "-smp", str(SMP),
            "-drive", f"file={image},format=raw,media=disk,if=ide",
            "-nographic", "-no-reboot", "-no-shutdown",
            "-s", "-S"]          # -s: gdb server on :1234, -S: start paused
@@ -288,6 +292,8 @@ def run_fault_tests() -> int:
 BENCH_FILE = ROOT / "docs" / "benchmarks.md"
 BENCH_NAMES = ["context_switch", "kmalloc_kfree_64", "kmalloc_kfree_4096", "trace_event",
                "pmm_page", "kmalloc_kfree_176", "slab_176"]
+# Added later: recorded after boot_s so older rows keep their columns.
+BENCH_LATER = ["context_switch_par"]
 BENCH_HEADER = """# Benchmarks
 
 Recorded by `python build.py bench`, which boots a kernel built with
@@ -304,34 +310,44 @@ poisoning and red-zone checks.
 - **pmm_page**: one physical page allocated and freed (batches of 256).
 - **kmalloc_kfree_176 / slab_176**: a thread-record-sized object from the
   general heap versus from a slab cache.
+- **context_switch_par**: the same switch measured on every CPU at once
+  (two threads pinned per CPU), averaged over CPUs. Close to
+  context_switch means switching scales per CPU. Bench runs give QEMU one
+  host thread per guest CPU (`thread=multi`), so the CPUs really run in
+  parallel; on a host with fewer free cores the number grows.
+- **cpus**: CPUs the bench kernel ran on (`--smp`).
 - **boot_s**: seconds from starting QEMU to the bench results (includes
   all boot self-tests).
 
-""" + "| Date | Commit | Host | " + " | ".join(BENCH_NAMES) + " | boot_s |\n" \
-    + "|---" * (len(BENCH_NAMES) + 4) + "|\n"
+""" + "| Date | Commit | Host | " + " | ".join(BENCH_NAMES) + " | boot_s | " \
+    + " | ".join(BENCH_LATER) + " | cpus |\n" + "|---" * (len(BENCH_NAMES) + len(BENCH_LATER) + 5) + "|\n"
 
 
 def run_bench() -> int:
     import datetime
     import platform
     import re
+    import test_boot
     from test_boot import boot_and_watch, FORBIDDEN
     image = build_image(build_kernel(bench=True))
+    test_boot.QEMU_THREADS = "multi"     # guest CPUs really in parallel
     success, out, seconds = boot_and_watch(image, ["[bench] done"], FORBIDDEN, 300)
+    test_boot.QEMU_THREADS = "single"
     build_image(build_kernel())   # leave a normal image behind
     results = dict(re.findall(r"\[bench\] (\w+): (\d+) cycles/op", out))
-    missing = [n for n in BENCH_NAMES if n not in results]
+    missing = [n for n in BENCH_NAMES + BENCH_LATER if n not in results]
     if not success or missing:
         print(f"[FAIL] benchmark run incomplete; missing: {', '.join(missing) or 'done marker'}")
         return 1
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
                             capture_output=True, text=True).stdout.strip() or "?"
     row = (f"| {datetime.date.today().isoformat()} | {commit} | {platform.system()} | "
-           + " | ".join(results[n] for n in BENCH_NAMES) + f" | {seconds:.1f} |\n")
+           + " | ".join(results[n] for n in BENCH_NAMES) + f" | {seconds:.1f} | "
+           + " | ".join(results[n] for n in BENCH_LATER) + f" | {SMP} |\n")
     text = BENCH_FILE.read_text(encoding="utf-8") if BENCH_FILE.exists() else BENCH_HEADER
     BENCH_FILE.write_text(text + row, encoding="utf-8", newline="\n")
     print("=" * 60)
-    for n in BENCH_NAMES:
+    for n in BENCH_NAMES + BENCH_LATER:
         print(f"[bench] {n:20s} {results[n]:>8} cycles/op")
     print(f"[PASS] results added to {BENCH_FILE.relative_to(ROOT).as_posix()}")
     return 0
@@ -419,7 +435,15 @@ def main() -> int:
     ap.add_argument("--fault-demo", choices=FAULT_DEMOS,
                     help="build a kernel that deliberately triggers this fatal "
                          "exception after the memory tests")
+    ap.add_argument("--smp", type=int, default=DEFAULT_SMP, metavar="N",
+                    help=f"number of CPUs for QEMU (1-16, default {DEFAULT_SMP})")
     args = ap.parse_args()
+    if not 1 <= args.smp <= 16:
+        ap.error("--smp must be between 1 and 16")
+    global SMP
+    SMP = args.smp
+    import test_boot
+    test_boot.QEMU_SMP = SMP
 
     if args.command == "help":
         ap.print_help()
