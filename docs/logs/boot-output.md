@@ -1,4 +1,4 @@
-# BharatOS — Boot Output (Phase 5 build)
+# BharatOS — Boot Output (Phase 5 build, with Phase 6 additions)
 
 This is the complete serial console output of one BharatOS boot in QEMU.
 It was captured from `python build.py run` (legacy BIOS boot, 512 MiB RAM)
@@ -38,7 +38,8 @@ on the Phase 5 build (commit `8239086`), and is reproduced verbatim from
 4. [Phase 3 memory tests](#4-phase-3-memory-tests)
 5. [Phase 4 process and thread tests](#5-phase-4-process-and-thread-tests)
 6. [Phase 5 scheduler tests and live demo](#6-phase-5-scheduler-tests-and-live-demo)
-7. [Final status](#7-final-status)
+7. [Phase 6 changes to this output](#7-phase-6-changes-to-this-output)
+8. [Final status](#8-final-status)
 
 ## 1. Firmware and kernel banner
 
@@ -795,7 +796,84 @@ BHARAT SCHEDULER
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
-## 7. Final status
+## 7. Phase 6 changes to this output
+
+This capture predates Phase 6. A current boot differs in three places
+(full details in `../phases/phase-6-debug-hardening.md`):
+
+- The banner's second line reads `Phase 6: Debug and Hardening Tools`.
+- In the live demo, the six `[SCHED] tick=...` lines are replaced by the
+  latest six events from the kernel event trace, for example:
+
+  ```text
+  [demo] Latest scheduling decisions from the event trace:
+  Recent events (6 of 10594, oldest first):
+    [10589] +0 cycles  sched.preempt a=0x126 b=0x127
+    [10590] +60855604 cycles  sched.preempt a=0x127 b=0x128
+  ```
+
+- After the scheduler tests, a new suite runs (29 checks, below), and the
+  final status gains `[ok] Phase 6 debug and hardening verified.`
+
+The new suite's output. The two `[heap] check:` lines are deliberate bad
+writes being detected, as the test intends:
+
+```text
+===== Debug and hardening tests =====
+
+[debug] Symbol table
+  [PASS] symbol table has the kernel's functions
+  [PASS] symbols are sorted by address
+  [PASS] kernel_main resolves to kernel_main+0x0
+  [PASS] an address inside a function gives name+offset
+  [PASS] data and null addresses are not reported as functions
+
+[debug] Call traces
+  [PASS] walk finds at least four frames
+  [PASS] frames are bt_level2 <- bt_level1 <- test_backtrace
+  sample trace from here:
+Call trace (most recent call first):
+  #0 0xffffffff80207ff2  test_backtrace+0xe2
+  #1 0xffffffff80207771  debug_run_tests+0x241
+  #2 0xffffffff80200af3  kernel_main+0x313
+  #3 0xffffffff8020018a  _start+0x4a
+  [PASS] a null frame pointer gives an empty trace
+  [PASS] an unmapped frame pointer gives an empty trace
+
+[debug] Stack protector
+  [PASS] canary was randomised at boot
+  [PASS] canary's low byte is 0 (stops string copies)
+
+[debug] Heap poisoning and red zones
+  [PASS] heap is consistent before the test
+  [PASS] allocation is followed by a red zone
+  [PASS] new allocation holds the poison pattern, not old data
+  [PASS] writing exactly the requested size leaves the red zone intact
+  (a red-zone report is expected next)
+[heap] check: red zone byte 0xffffc00000000114 of block 0xffffc00000000100 was overwritten
+  [PASS] write one byte past the end is caught
+  [PASS] heap is consistent again once repaired
+  [PASS] free the block
+  [PASS] freed memory is poisoned
+  (a use-after-free report is expected next)
+[heap] check: freed memory at 0xffffc00000000108 was written after free
+  [PASS] write into freed memory is caught
+  [PASS] heap is consistent again once repaired
+  [PASS] kzalloc zeroes only the requested bytes
+  [PASS] heap is consistent after the test
+
+[debug] Event trace
+  [PASS] boot already recorded events (threads, switches)
+  [PASS] events come back in order with their arguments and timestamps
+  [PASS] newest event survives a full wrap
+  [PASS] total counts overwritten events too
+  [PASS] disabled trace records nothing
+  [PASS] event type names, including out-of-range types
+
+===== Debug tests: 29 passed, 0 failed =====
+```
+
+## 8. Final status
 
 Every phase reports verified. The dots are the one-per-second heartbeat while the idle thread halts the CPU.
 
@@ -804,5 +882,6 @@ Every phase reports verified. The dots are the one-per-second heartbeat while th
 [ok] Phase 3 memory management verified.
 [ok] Phase 4 process management verified.
 [ok] Phase 5 scheduler verified.
+[ok] Phase 6 debug and hardening verified.   (added in Phase 6)
 ......................................................................................
 ```

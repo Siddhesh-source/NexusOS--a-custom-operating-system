@@ -243,7 +243,7 @@ boot, bad-input tests, a one-minute demo, and docs. **New rules:**
 
 | Phase | Name | Main USP / showcase | Size |
 |---|---|---|---|
-| 6 | Debug and hardening foundation | engineering quality | M |
+| 6 | Debug and hardening foundation ✅ done | engineering quality | M |
 | 7 | Modern hardware | serious OS | L |
 | 8 | Memory that scales | serious OS | L |
 | 9 | Multi-core | concurrency | L |
@@ -261,6 +261,9 @@ boot, bad-input tests, a one-minute demo, and docs. **New rules:**
 | later | RISC-V port, self-hosting | portability | XL |
 
 ### Phase 6: Debug and hardening foundation
+**Status: ✅ done.** All nine steps are built and tested; see
+`phases/phase-6-debug-hardening.md`. Host unit tests live in `tests/unit/`.
+
 **Goal:** make every later phase easier to debug and harder to break.
 1. **CI (swift):** one GitHub Actions job on Ubuntu with a cached
    toolchain: build + one BIOS boot test (`build.py test`), short timeout.
@@ -656,14 +659,15 @@ kernel/ring/       async rings                       (Ph 10)
 kernel/ipc/        channels, shared memory           (Ph 11)
 kernel/smp/        CPU bring-up, per-CPU, locks, RCU (Ph 9)
 kernel/acpi/, kernel/pci/                            (Ph 7)
-kernel/trace/      tracing, diary, verifier          (Ph 6, 12, 20)
+kernel/trace/      tracing, diary, verifier          (Ph 6 created, 12, 20)
 kernel/checkpoint/ checkpoint and replay hooks       (Ph 17)
 user/runtime/c/, user/runtime/rust/                  (Ph 11)
 user/services/     manager, fs, net, drivers, desktop, perms, migrate
 user/apps/, user/wasm/                               (Ph 18)
 idl/               message definitions               (Ph 11)
 specs/             TLA+ specs                        (Ph 14)
-sim/               host-side simulation tests        (Ph 6, 14)
+sim/               host-side simulation tests        (Ph 14)
+tests/unit/        host-side unit tests, no libc     (Ph 6, created)
 docs/benchmarks.md, docs/BUG_JOURNAL.md, docs/decisions.md
 ```
 
@@ -678,7 +682,7 @@ docs/benchmarks.md, docs/BUG_JOURNAL.md, docs/decisions.md
 | `python build.py test --smp 4` | boot tests on 4 CPUs | 9 |
 | `python build.py debug` | QEMU paused + GDB script | 6 |
 | `python build.py unit` | host-side unit tests | 6 |
-| `python build.py sim [--runs N --seed S]` | simulation tests with failure injection | 6, 14 |
+| `python build.py sim [--runs N --seed S]` | simulation tests with failure injection | 14 |
 | `python build.py fuzz [--ops N]` | system-call and ring fuzzer | 10 |
 | `python build.py bench` | benchmarks → `docs/benchmarks.md` | 6 |
 | `python build.py tla` | run TLC on `specs/` | 14 |
@@ -714,6 +718,9 @@ operation, ring batch of 64, IPC round trip, page fault, 4 KiB file read
 | D14 | Stay general-purpose; use-case profiles later | flexibility | single niche now | a strong use case appears (§12) |
 | D15 | No AI in the core; `why` is rules over real data | explainable, offline | AI assistant | — |
 | D16 | Devanagari shaped at build time first | correct text, no shaping engine in OS | runtime shaper first | lots of typed Indic text |
+| D17 | Host unit tests are freestanding programs (no C library), one tiny host layer per OS | the same clang + lld as the kernel work on Windows and Linux; no MSVC/MinGW/glibc needed | hosted tests with libc; tests only inside QEMU | a test needs real host services (files, threads) |
+| D18 | Symbol table embedded by a second link, checked not to move code | names in every panic, no debug-info parser in the kernel | DWARF in the kernel; addresses only + offline `addr2line` | line numbers are needed in traces |
+| D19 | Heap poisoning and red zones always on | memory bugs caught at the moment of reuse/free, in every build | debug-only builds | heap speed matters (revisit with the slab allocator, Phase 8) |
 
 Earlier decisions in `design/HLD.md` §6 still apply unless replaced above.
 
