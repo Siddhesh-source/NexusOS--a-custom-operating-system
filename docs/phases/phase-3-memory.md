@@ -1,4 +1,4 @@
-# NEXUS OS — Phase 3: Memory Management
+# BharatOS — Phase 3: Memory Management
 
 Phase 3 adds the memory-management foundation that later process and
 userspace support will build on: a physical page-frame allocator, the

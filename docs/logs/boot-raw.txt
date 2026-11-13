@@ -1,8 +1,17 @@
-SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
+c[?7l[2J[0mSeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
+
+
+iPXE (http://ipxe.org) 00:03.0 CA00 PCI2.10 PnP PMM+1EFD1F90+1EF31F90 CA00
+Press Ctrl-B to configure iPXE (PCI 00:03.0)...
+
+
+
+Booting from Hard Disk...
+[01;01H
 ============================================
-            N E X U S   O S
-     Phase 5: Preemptive Scheduler0 PCI2.10 PnP PMM+1EFD1F90+1EF31F90 CA00
-============================================                                   
+           B H A R A T   O S
+     Phase 5: Preemptive Scheduler
+============================================
 
 [boot] CPU entered long mode (64-bit).
 [boot] Bootloader: Limine 12.6.1
@@ -45,8 +54,8 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 [vmm]   .text   0xffffffff80200000 - 0xffffffff80210000 -> phys 0x000000001fef1000  R-X
 [vmm]   .rodata 0xffffffff80210000 - 0xffffffff80216000 -> phys 0x000000001ff01000  R--
 [vmm]   .data   0xffffffff80216000 - 0xffffffff8022d000 -> phys 0x000000001ff07000  RW-
-[vmm]   HHDM    0xffff800000000000 - 0xffff8000fd3e8000  RW-  (527588 KiB of RAM-backe)
-[vmm] Switched to kernel page tables (CR3=0x0000000000076000), 519 page-table pages usd
+[vmm]   HHDM    0xffff800000000000 - 0xffff8000fd3e8000  RW-  (527588 KiB of RAM-backed memory)
+[vmm] Switched to kernel page tables (CR3=0x0000000000076000), 519 page-table pages used
 [vmm] Boot stack guard page at 0xffffffff80217000
 [mm] Initialising kernel heap...
 [heap] Kernel heap at 0xffffc00000000000, 64 KiB mapped, limit 256 MiB
@@ -119,7 +128,7 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 
 [#PF] Page fault
 [#PF]   faulting address : 0xffffd00000000000 (memory-test window)
-[#PF]   instruction ptr  : 0xffffffff8020fc9b
+[#PF]   instruction ptr  : 0xffffffff8020fd7b
 [#PF]   error code       : 0x3 [P=1 W=1 U=0 RSVD=0 I/D=0]
 [#PF]   access           : write
 [#PF]   mode             : kernel
@@ -147,7 +156,7 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 
 [#PF] Page fault
 [#PF]   faulting address : 0xffffd00000000000 (memory-test window)
-[#PF]   instruction ptr  : 0xffffffff8020fc92
+[#PF]   instruction ptr  : 0xffffffff8020fd72
 [#PF]   error code       : 0x0 [P=0 W=0 U=0 RSVD=0 I/D=0]
 [#PF]   access           : read
 [#PF]   mode             : kernel
@@ -172,7 +181,7 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 
 [#PF] Page fault
 [#PF]   faulting address : 0xffffffff80200000 (kernel .text)
-[#PF]   instruction ptr  : 0xffffffff8020fc9b
+[#PF]   instruction ptr  : 0xffffffff8020fd7b
 [#PF]   error code       : 0x3 [P=1 W=1 U=0 RSVD=0 I/D=0]
 [#PF]   access           : write
 [#PF]   mode             : kernel
@@ -181,8 +190,8 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 [test]   PASS  write to kernel .text faults
 
 [#PF] Page fault
-[#PF]   faulting address : 0xffffffff80215d30 (kernel .rodata)
-[#PF]   instruction ptr  : 0xffffffff8020fc9b
+[#PF]   faulting address : 0xffffffff80215e30 (kernel .rodata)
+[#PF]   instruction ptr  : 0xffffffff8020fd7b
 [#PF]   error code       : 0x3 [P=1 W=1 U=0 RSVD=0 I/D=0]
 [#PF]   access           : write
 [#PF]   mode             : kernel
@@ -202,7 +211,7 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 
 [#PF] Page fault
 [#PF]   faulting address : 0x0000000000000000 (null page)
-[#PF]   instruction ptr  : 0xffffffff8020fc92
+[#PF]   instruction ptr  : 0xffffffff8020fd72
 [#PF]   error code       : 0x0 [P=0 W=0 U=0 RSVD=0 I/D=0]
 [#PF]   access           : read
 [#PF]   mode             : kernel
@@ -212,7 +221,7 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 
 [#PF] Page fault
 [#PF]   faulting address : 0x0000000000400000 (user space)
-[#PF]   instruction ptr  : 0xffffffff8020fc9b
+[#PF]   instruction ptr  : 0xffffffff8020fd7b
 [#PF]   error code       : 0x2 [P=0 W=1 U=0 RSVD=0 I/D=0]
 [#PF]   access           : write
 [#PF]   mode             : kernel
@@ -222,7 +231,7 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 
 [#PF] Page fault
 [#PF]   faulting address : 0xffffffff80217000 (boot stack guard page)
-[#PF]   instruction ptr  : 0xffffffff8020fc92
+[#PF]   instruction ptr  : 0xffffffff8020fd72
 [#PF]   error code       : 0x0 [P=0 W=0 U=0 RSVD=0 I/D=0]
 [#PF]   access           : read
 [#PF]   mode             : kernel
@@ -232,7 +241,7 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 
 [#PF] Page fault
 [#PF]   faulting address : 0xffffa00000000000 (unmapped kernel space)
-[#PF]   instruction ptr  : 0xffffffff8020fc92
+[#PF]   instruction ptr  : 0xffffffff8020fd72
 [#PF]   error code       : 0x0 [P=0 W=0 U=0 RSVD=0 I/D=0]
 [#PF]   access           : read
 [#PF]   mode             : kernel
@@ -242,14 +251,14 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 
 [#PF] Page fault
 [#PF]   faulting address : 0xffffc0000ffff000 (kernel heap)
-[#PF]   instruction ptr  : 0xffffffff8020fc92
+[#PF]   instruction ptr  : 0xffffffff8020fd72
 [#PF]   error code       : 0x0 [P=0 W=0 U=0 RSVD=0 I/D=0]
 [#PF]   access           : read
 [#PF]   mode             : kernel
 [#PF]   cause            : page not present
 [#PF]   outcome          : recovered (memory probe fixup)
 [test]   PASS  unbacked kernel heap space is unmapped
-[#GP] General protection fault at rip=0xffffffff8020fca4 (error 0x0) - recovered by prp
+[#GP] General protection fault at rip=0xffffffff8020fd84 (error 0x0) - recovered by probe fixup
 [test]   PASS  non-canonical access faults (reported as #GP)
 [test]   PASS  non-canonical access raised #GP, not #PF
 [test]   PASS  every invalid access produced exactly one page-fault report
@@ -321,9 +330,9 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 [pmm] Free memory           :   519244 KiB (129811 pages)
 [pmm] Allocated pages       :      797 of 130608 managed
 [pmm] Non-RAM ranges        : 12587361 KiB (firmware/MMIO, excluded)
-[heap] mapped=1092 KiB used=0 B free=1118176 B blocks=1 (free 1) largest_free=1118176 7
+[heap] mapped=1092 KiB used=0 B free=1118176 B blocks=1 (free 1) largest_free=1118176 B failures=7
 [kstack] 256 slots of 32 KiB (16 KiB stack + guard) at 0xffffe00000000000
-[proc] Kernel process PID 0 created; boot flow adopted as TID 0 (stack 0xffffffff80218)
+[proc] Kernel process PID 0 created; boot flow adopted as TID 0 (stack 0xffffffff80218000 - 0xffffffff80227000)
 
 [test] ===== Phase 4 process / thread tests =====
 
@@ -353,39 +362,39 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 [proc] thread_create failed: invalid object or argument
 [test]   PASS  thread without entry point rejected
 [test]   PASS  process_terminate terminates the process and its threads
-[proc] thread_create (process terminated) failed: operation not allowed in current stae
+[proc] thread_create (process terminated) failed: operation not allowed in current state
 [test]   PASS  no new threads in a terminated process
 [test]   diagnostics for a freshly created thread:
-[NEXUS PROC] ------------------------------------------
+[BHARAT PROC] ------------------------------------------
   PID      : 1 (proc-a)
   TID      : 1 (t1)
   STATE    : READY
-  KSTACK   : 0xffffe00000004000 - 0xffffe00000008000 (16 KiB, peak use 56 B, canary in)
+  KSTACK   : 0xffffe00000004000 - 0xffffe00000008000 (16 KiB, peak use 56 B, canary intact)
   RSP      : 0xffffe00000007fb0 (saved)
-  RIP      : 0xffffffff8020fccd (saved return address)
+  RIP      : 0xffffffff8020fb7d (saved return address)
   ADDR SPC : PML4 0x00000000003ef000 (own address space)
   SWITCHES : 0
 [test]   PASS  terminate process with two unstarted threads
 [test]   PASS  reaping removes the terminated threads and processes
 
 [test] --- Context switching: A <-> B ping-pong ---
-[NEXUS] Creating thread A
-[NEXUS] Creating thread B
+[BHARAT] Creating thread A
+[BHARAT] Creating thread B
 [test]   PASS  create two processes, one thread each
 
-[NEXUS] Process table before the first switch:
-╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS PROCESS MANAGER                                                    ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ PID  TID  STATE       NAME       KSTACK TOP         RSP                  ║
-║ 0    0    RUNNING     kmain      0xffffffff80227000 0xffffffff80226e00   ║
-║ 3    4    READY       thread-A   0xffffe00000008000 0xffffe00000007fb0   ║
-║ 4    5    READY       thread-B   0xffffe00000010000 0xffffe0000000ffb0   ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ PID 0   kernel     RUNNING     thr=1   PML4=0x0000000000076000 kernel    ║
-║ PID 3   demo-a     READY       thr=1   PML4=0x00000000003ef000 own       ║
-║ PID 4   demo-b     READY       thr=1   PML4=0x00000000003f0000 own       ║
-╚══════════════════════════════════════════════════════════════════════════╝
+[BHARAT] Process table before the first switch:
+????????????????????????????????????????????????????????????????????????????
+? BHARAT PROCESS MANAGER                                                   ?
+????????????????????????????????????????????????????????????????????????????
+? PID  TID  STATE       NAME       KSTACK TOP         RSP                  ?
+? 0    0    RUNNING     kmain      0xffffffff80227000 0xffffffff80226e00   ?
+? 3    4    READY       thread-A   0xffffe00000008000 0xffffe00000007fb0   ?
+? 4    5    READY       thread-B   0xffffe00000010000 0xffffe0000000ffb0   ?
+????????????????????????????????????????????????????????????????????????????
+? PID 0   kernel     RUNNING     thr=1   PML4=0x0000000000076000 kernel    ?
+? PID 3   demo-a     READY       thr=1   PML4=0x00000000003ef000 own       ?
+? PID 4   demo-b     READY       thr=1   PML4=0x00000000003f0000 own       ?
+????????????????????????????????????????????????????????????????????????????
 
 [A] counter = 1  (TID 4, rsp in own stack)
 [B] counter = 101  (TID 5, rsp in own stack)
@@ -419,12 +428,12 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 [test] --- Context preservation: callee-saved registers and RFLAGS.IF ---
 [test]   PASS  create two register-test threads
 [test]   PASS  both threads completed every round (execution resumed correctly)
-[test]   PASS  rbx, rbp, r12-r15 preserved across 50 switches with different values ped
+[test]   PASS  rbx, rbp, r12-r15 preserved across 50 switches with different values per thread
 [test]   PASS  each thread keeps its own interrupt-enable flag across switches
 
 [test] --- Stress: 3-thread ring, 60000 switches, interrupts enabled ---
 [test]   PASS  create a ring of three threads
-[test]   60003 switches into ring threads; 3 timer interrupts arrived meanwhile
+[test]   60003 switches into ring threads; 7 timer interrupts arrived meanwhile
 [test]   PASS  every member completed all laps with its local counter intact
 [test]   PASS  execution followed the exact ring order A -> B -> C -> A
 [test]   PASS  callee-saved registers intact on every one of the switches
@@ -494,36 +503,36 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 
 [test] ===== 83 passed, 0 failed =====
 
-[NEXUS] Process table after all tests (only the kernel remains):
-╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS PROCESS MANAGER                                                    ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ PID  TID  STATE       NAME       KSTACK TOP         RSP                  ║
-║ 0    0    RUNNING     kmain      0xffffffff80227000 0xffffffff80226e00   ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ PID 0   kernel     RUNNING     thr=1   PML4=0x0000000000076000 kernel    ║
-╚══════════════════════════════════════════════════════════════════════════╝
+[BHARAT] Process table after all tests (only the kernel remains):
+????????????????????????????????????????????????????????????????????????????
+? BHARAT PROCESS MANAGER                                                   ?
+????????????????????????????????????????????????????????????????????????????
+? PID  TID  STATE       NAME       KSTACK TOP         RSP                  ?
+? 0    0    RUNNING     kmain      0xffffffff80227000 0xffffffff80226e00   ?
+????????????????????????????????????????????????????????????????????????????
+? PID 0   kernel     RUNNING     thr=1   PML4=0x0000000000076000 kernel    ?
+????????????????????????????????????????????????????????????????????????????
 
-╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS PROCESS MANAGER - Phase 4 results                                  ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ Context Switch Test                                                      ║
-║                                                                          ║
-║ kmain → Thread A (PID 3, TID 4) → Thread B (PID 4, TID 5) → A ...        ║
-║                                                                          ║
-║ A counter: 10   (started at 0, 10 rounds)                                ║
-║ B counter: 110  (started at 100, 10 rounds)                              ║
-║ switches into A and B: 22                                                ║
-║                                                                          ║
-.║ [PASS] Thread switching (exact A/B interleaving)                         ║
-║ [PASS] Context preservation (registers, RFLAGS.IF)                       ║
-║ [PASS] Stack isolation                                                   ║
-║ [PASS] Lifecycle and cleanup                                             ║
-║ [PASS] Memory integration, no leaks                                      ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ checks: 83 passed, 0 failed                                              ║
-╚══════════════════════════════════════════════════════════════════════════╝
-[sched] Round-robin scheduler: 100 Hz timer, quantum 2 ticks (20 ms), idle TID 273; bot
+????????????????????????????????????????????????????????????????????????????
+? BHARAT PROCESS MANAGER - Phase 4 results                                 ?
+????????????????????????????????????????????????????????????????????????????
+? Context Switch Test                                                      ?
+?                                                                          ?
+? kmain ? Thread A (PID 3, TID 4) ? Thread B (PID 4, TID 5) ? A ...        ?
+?                                                                          ?
+? A counter: 10   (started at 0, 10 rounds)                                ?
+? B counter: 110  (started at 100, 10 rounds)                              ?
+? switches into A and B: 22                                                ?
+?                                                                          ?
+? [PASS] Thread switching (exact A/B interleaving)                         ?
+? [PASS] Context preservation (registers, RFLAGS.IF)                       ?
+? [PASS] Stack isolation                                                   ?
+? [PASS] Lifecycle and cleanup                                             ?
+? [PASS] Memory integration, no leaks                                      ?
+????????????????????????????????????????????????????????????????????????????
+? checks: 83 passed, 0 failed                                              ?
+????????????????????????????????????????????????????????????????????????????
+[sched] Round-robin scheduler: 100 Hz timer, quantum 2 ticks (20 ms), idle TID 273; boot thread TID 0 registered as current
 [sched] Preemption enabled (0 threads READY).
 
 [test] ===== Phase 5 scheduler tests =====
@@ -535,24 +544,24 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 
 [test] --- Preemption: two threads that never yield ---
 [test]   PASS  create two CPU-bound threads with no yield calls
-[test]   A: 39497641 iterations, saw B progress 11 times while inside its loop
-[test]   B: 38243653 iterations, saw A progress 10 times while inside its loop
-[test]   preemptions during the window: 24 (A preempted 12, B preempted 11)
+[test]   A: 20481657 iterations, saw B progress 11 times while inside its loop
+[test]   B: 19534953 iterations, saw A progress 10 times while inside its loop
+[test]   preemptions during the window: 21 (A preempted 11, B preempted 10)
 [test]   PASS  both non-yielding threads made progress
-[test]   PASS  each saw the other advance while itself still inside its loop (it was i)
+[test]   PASS  each saw the other advance while itself still inside its loop (it was interrupted)
 [test]   PASS  switches were forced by the timer (preemption counters)
 [test]   PASS  both threads exited when told to stop
 
 [test] --- Context preservation: all 15 GPRs across preemption ---
-[test]   regspin 0: 4297549 checks of all registers, 9 preemptions, 0 mismatches
-[test]   regspin 1: 4213743 checks of all registers, 9 preemptions, 0 mismatches
-[test]   regspin 2: 4210754 checks of all registers, 9 preemptions, 0 mismatches
+[test]   regspin 0: 2714106 checks of all registers, 9 preemptions, 0 mismatches
+[test]   regspin 1: 3018636 checks of all registers, 9 preemptions, 0 mismatches
+[test]   regspin 2: 2624020 checks of all registers, 9 preemptions, 0 mismatches
 [test]   PASS  rax..r15 intact through every preemption in three competing threads
 
 [test] --- Stack isolation: three threads rewriting stack data while preempted ---
-[test]   iso 0: 143749 rounds verified, 11 preemptions, 0 corrupted words
-[test]   iso 1: 154509 rounds verified, 11 preemptions, 0 corrupted words
-[test]   iso 2: 137921 rounds verified, 10 preemptions, 0 corrupted words
+[test]   iso 0: 105752 rounds verified, 11 preemptions, 0 corrupted words
+[test]   iso 1: 97244 rounds verified, 11 preemptions, 0 corrupted words
+[test]   iso 2: 69848 rounds verified, 10 preemptions, 0 corrupted words
 [test]   PASS  each thread's stack data stayed exactly as it left it
 
 [test] --- Round-robin order: A -> B -> C -> A ... ---
@@ -563,9 +572,9 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 
   SCHEDULER FAIRNESS TEST (154 ticks, quantum 2)
 
-  Thread A :  26 time slices,  52 CPU ticks, 123288859 loop iterations
-  Thread B :  26 time slices,  52 CPU ticks, 123578181 loop iterations
-  Thread C :  25 time slices,  50 CPU ticks, 117762496 loop iterations
+  Thread A :  26 time slices,  52 CPU ticks, 73710424 loop iterations
+  Thread B :  26 time slices,  52 CPU ticks, 68511637 loop iterations
+  Thread C :  25 time slices,  50 CPU ticks, 66197934 loop iterations
 
 [test]   PASS  No runnable thread starved
 [test]   PASS  time slices within 2 and CPU ticks within 2 quanta of each other
@@ -587,135 +596,134 @@ SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 [test] --- Scheduler overhead sanity check ---
 [test]   timer frequency        : 100 Hz (tick = 10 ms)
 [test]   scheduling interval    : 2 ticks = 20 ms
-[test]   TSC cycles per tick    : 29773224
-[test]   yield switches measured: 10003
-[test]   cycles per switch      : 2339
-[test]   preemptive switch cost : ~0.0039% of CPU at 50 switches/s
+[test]   TSC cycles per tick    : 41866581
+[test]   yield switches measured: 10004
+[test]   cycles per switch      : 4577
+[test]   preemptive switch cost : ~0.0054% of CPU at 50 switches/s
 [test]   PASS  every yield between two threads is a switch
 [test]   PASS  scheduling overhead below 5% of CPU time
 
 [test] --- Live multitasking demo ---
 [demo] Tracing the first scheduling decisions (rate-limited):
-[SCHED] tick=450 current=TID 0 (BLOCKED) next=TID 294 (cpu) reason=sleep switch_count=1
-[SCHED] tick=452 current=TID 294 (RUNNING) next=TID 295 (memory) reason=quantum expire2
-[SCHED] tick=454 current=TID 295 (RUNNING) next=TID 296 (counter) reason=quantum expir3
-[SCHED] tick=456 current=TID 296 (RUNNING) next=TID 294 (cpu) reason=quantum expired s4
-[SCHED] tick=458 current=TID 294 (RUNNING) next=TID 295 (memory) reason=quantum expire5
-[SCHED] tick=460 current=TID 295 (RUNNING) next=TID 296 (counter) reason=quantum expir6
+[SCHED] tick=443 current=TID 0 (BLOCKED) next=TID 294 (cpu) reason=sleep switch_count=10229
+[SCHED] tick=445 current=TID 294 (RUNNING) next=TID 295 (memory) reason=quantum expired switch_count=10230
+[SCHED] tick=447 current=TID 295 (RUNNING) next=TID 296 (counter) reason=quantum expired switch_count=10231
+[SCHED] tick=449 current=TID 296 (RUNNING) next=TID 294 (cpu) reason=quantum expired switch_count=10232
+[SCHED] tick=451 current=TID 294 (RUNNING) next=TID 295 (memory) reason=quantum expired switch_count=10233
+[SCHED] tick=453 current=TID 295 (RUNNING) next=TID 296 (counter) reason=quantum expired switch_count=10234
 
-╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS SCHEDULER  (live, refresh 1/4)                                     ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ║
-║ ───────────────────────────────────────────────────────────────────      ║
-║ 0    RUNNING    kmain                     -        32         4          ║
-║ 273  READY      idle                      -        12        79          ║
-║ 294  READY      CPU Worker            52696         9        18          ║
-║ 295  READY      Memory Worker         21276         9        18          ║
-║ 296  READY      Counter            39048116         9        18          ║
-║                                                                          ║
-║ Timer ticks       : 504                                                  ║
-║ Context switches  : 10258 (221 preemptive, 10037 voluntary)              ║
-║ Runnable threads  : 3    Current thread : TID 0 (this dashboard)         ║
-║ Scheduling: ROUND-ROBIN, quantum 20 ms                                   ║
-╚══════════════════════════════════════════════════════════════════════════╝
+????????????????????????????????????????????????????????????????????????????
+? BHARAT SCHEDULER  (live, refresh 1/4)                                    ?
+????????????????????????????????????????????????????????????????????????????
+? TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ?
+? ???????????????????????????????????????????????????????????????????      ?
+? 0    RUNNING    kmain                     -        32         0          ?
+? 273  READY      idle                      -        12        79          ?
+? 294  READY      CPU Worker            46177         9        18          ?
+? 295  READY      Memory Worker         16948         9        18          ?
+? 296  READY      Counter            21987352         9        18          ?
+?                                                                          ?
+? Timer ticks       : 497                                                  ?
+? Context switches  : 10256 (218 preemptive, 10038 voluntary)              ?
+? Runnable threads  : 3    Current thread : TID 0 (this dashboard)         ?
+? Scheduling: ROUND-ROBIN, quantum 20 ms                                   ?
+????????????????????????????????????????????????????????????????????????????
 
-╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS SCHEDULER  (live, refresh 2/4)                                     ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ║
-║ ───────────────────────────────────────────────────────────────────      ║
-║ 0    RUNNING    kmain                     -        34         7          ║
-║ 273  READY      idle                      -        12        79          ║
-║ 294  READY      CPU Worker            88889        19        38          ║
-║ 295  READY      Memory Worker         47254        19        38          ║
-║ 296  READY      Counter            86347150        19        38          ║
-║                                                                          ║
-║ Timer ticks       : 567                                                  ║
-║ Context switches  : 10290 (252 preemptive, 10038 voluntary)              ║
-║ Runnable threads  : 3    Current thread : TID 0 (this dashboard)         ║
-║ Scheduling: ROUND-ROBIN, quantum 20 ms                                   ║
-╚══════════════════════════════════════════════════════════════════════════╝
+????????????????????????????????????????????????????????????????????????????
+? BHARAT SCHEDULER  (live, refresh 2/4)                                    ?
+????????????????????????????????????????????????????????????????????????????
+? TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ?
+? ???????????????????????????????????????????????????????????????????      ?
+? 0    RUNNING    kmain                     -        33         0          ?
+? 273  READY      idle                      -        12        79          ?
+? 294  READY      CPU Worker            72283        18        36          ?
+? 295  READY      Memory Worker         33806        18        36          ?
+? 296  READY      Counter            46528702        18        36          ?
+?                                                                          ?
+? Timer ticks       : 551                                                  ?
+? Context switches  : 10284 (245 preemptive, 10039 voluntary)              ?
+? Runnable threads  : 3    Current thread : TID 0 (this dashboard)         ?
+? Scheduling: ROUND-ROBIN, quantum 20 ms                                   ?
+????????????????????????????????????????????????????????????????????????????
 
-╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS SCHEDULER  (live, refresh 3/4)                                     ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ║
-║ ───────────────────────────────────────────────────────────────────      ║
-║ 0    RUNNING    kmain                     -        36        10          ║
-║ 273  READY      idle                      -        12        79          ║
-║ 294  READY      CPU Worker           118015        29        58          ║
-║ 295  READY      Memory Worker         73903        29        58          ║
-║ 296  READY      Counter           135056020        29        58          ║
-║                                                                          ║
-║ Timer ticks       : 630                                                  ║
-║ Context switches  : 10322 (283 preemptive, 10039 voluntary)              ║
-║ Runnable threads  : 3    Current thread : TID 0 (this dashboard)         ║
-║ Scheduling: ROUND-ROBIN, quantum 20 ms                                   ║
-╚══════════════════════════════════════════════════════════════════════════╝
+????????????????????????????????????????????????????????????????????????????
+? BHARAT SCHEDULER  (live, refresh 3/4)                                    ?
+????????????????????????????????????????????????????????????????????????????
+? TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ?
+? ???????????????????????????????????????????????????????????????????      ?
+? 0    RUNNING    kmain                     -        34         0          ?
+? 273  READY      idle                      -        12        79          ?
+? 294  READY      CPU Worker            94643        27        54          ?
+? 295  READY      Memory Worker         51549        27        54          ?
+? 296  READY      Counter            70816105        27        54          ?
+?                                                                          ?
+? Timer ticks       : 605                                                  ?
+? Context switches  : 10312 (272 preemptive, 10040 voluntary)              ?
+? Runnable threads  : 3    Current thread : TID 0 (this dashboard)         ?
+? Scheduling: ROUND-ROBIN, quantum 20 ms                                   ?
+????????????????????????????????????????????????????????????????????????????
 
-╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS SCHEDULER  (live, refresh 4/4)                                     ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ║
-║ ───────────────────────────────────────────────────────────────────      ║
-║ 0    RUNNING    kmain                     -        38        13          ║
-║ 273  READY      idle                      -        12        79          ║
-║ 294  READY      CPU Worker           144596        39        78          ║
-║ 295  READY      Memory Worker         99433        39        78          ║
-║ 296  READY      Counter           183605757        39        78          ║
-║                                                                          ║
-║ Timer ticks       : 693                                                  ║
-║ Context switches  : 10354 (314 preemptive, 10040 voluntary)              ║
-║ Runnable threads  : 3    Current thread : TID 0 (this dashboard)         ║
-║ Scheduling: ROUND-ROBIN, quantum 20 ms                                   ║
-╚══════════════════════════════════════════════════════════════════════════╝
+????????????????????????????????????????????????????????????????????????????
+? BHARAT SCHEDULER  (live, refresh 4/4)                                    ?
+????????????????????????????????????????????????????????????????????????????
+? TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ?
+? ???????????????????????????????????????????????????????????????????      ?
+? 0    RUNNING    kmain                     -        35         0          ?
+? 273  READY      idle                      -        12        79          ?
+? 294  READY      CPU Worker           117776        36        72          ?
+? 295  READY      Memory Worker         70402        36        72          ?
+? 296  READY      Counter           102588608        36        72          ?
+?                                                                          ?
+? Timer ticks       : 659                                                  ?
+? Context switches  : 10340 (299 preemptive, 10041 voluntary)              ?
+? Runnable threads  : 3    Current thread : TID 0 (this dashboard)         ?
+? Scheduling: ROUND-ROBIN, quantum 20 ms                                   ?
+????????????????????????????????????????????????????????????????????????????
 [test]   PASS  demo: all three workers progressed, were preempted, no memory errors
 [test]   PASS  scheduler queues consistent after the demo
 
 [test] ===== 26 passed, 0 failed =====
 
-NEXUS SCHEDULER
+BHARAT SCHEDULER
   Policy            : ROUND-ROBIN, quantum 2 ticks
-  Timer ticks       : 703
-  Scheduler calls   : 10747
-  Context switches  : 10363 (319 preemptive, 10044 voluntary)
+  Timer ticks       : 660
+  Scheduler calls   : 10705
+  Context switches  : 10345 (300 preemptive, 10045 voluntary)
   Runnable threads  : 0
   Sleeping threads  : 0
   Idle ticks        : 80
   Current thread    : TID 0
 
-╔══════════════════════════════════════════════════════════════════════════╗
-║                     NEXUS SYSTEM STATUS                                  ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ Scheduler       : ROUND-ROBIN (quantum 20 ms)                            ║
-║ CPU             : x86-64, 1 CPU                                          ║
-║ Timer           : ACTIVE, PIT 100 Hz                                     ║
-║                                                                          ║
-║ TID  WORK             ITERATIONS  SWITCHES  PREEMPTED CPU TICKS          ║
-║ ───────────────────────────────────────────────────────────────────      ║
-║ 294  CPU Worker           147112        41         40        80          ║
-║ 295  Memory Worker        102059        41         40        80          ║
-║ 296  Counter           188387511        41         40        80          ║
-║ Memory worker errors: 0                                                  ║
-║                                                                          ║
-║ Timer ticks       : 704                                                  ║
-║ Context switches  : 10363 (319 preemptive, 10044 voluntary)              ║
-║ Idle ticks        : 80                                                   ║
-║                                                                          ║
-║ [PASS] Preemption (non-yielding threads interleaved)                     ║
-║ [PASS] Context preservation (all 15 GPRs)                                ║
-║ [PASS] Thread isolation (stack data under preemption)                    ║
-║ [PASS] Round-robin order                                                 ║
-║ [PASS] Scheduler fairness                                                ║
-║ [PASS] Termination (never rescheduled, reclaimed)                        ║
-║ [PASS] Idle thread and sleep                                             ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║ checks: 26 passed, 0 failed                                              ║
-╚══════════════════════════════════════════════════════════════════════════╝
+????????????????????????????????????????????????????????????????????????????
+?                     BHARAT SYSTEM STATUS                                 ?
+????????????????????????????????????????????????????????????????????????????
+? Scheduler       : ROUND-ROBIN (quantum 20 ms)                            ?
+? CPU             : x86-64, 1 CPU                                          ?
+? Timer           : ACTIVE, PIT 100 Hz                                     ?
+?                                                                          ?
+? TID  WORK             ITERATIONS  SWITCHES  PREEMPTED CPU TICKS          ?
+? ???????????????????????????????????????????????????????????????????      ?
+? 294  CPU Worker           117777        37         36        72          ?
+? 295  Memory Worker         70403        37         36        72          ?
+? 296  Counter           102588609        37         36        72          ?
+? Memory worker errors: 0                                                  ?
+?                                                                          ?
+? Timer ticks       : 660                                                  ?
+? Context switches  : 10345 (300 preemptive, 10045 voluntary)              ?
+? Idle ticks        : 80                                                   ?
+?                                                                          ?
+? [PASS] Preemption (non-yielding threads interleaved)                     ?
+? [PASS] Context preservation (all 15 GPRs)                                ?
+? [PASS] Thread isolation (stack data under preemption)                    ?
+? [PASS] Round-robin order                                                 ?
+? [PASS] Scheduler fairness                                                ?
+? [PASS] Termination (never rescheduled, reclaimed)                        ?
+? [PASS] Idle thread and sleep                                             ?
+????????????????????????????????????????????????????????????????????????????
+? checks: 26 passed, 0 failed                                              ?
+????????????????????????????????????????????????????????????????????????????
 
 [ok] Kernel started successfully.
 [ok] Phase 3 memory management verified.
 [ok] Phase 4 process management verified.
 [ok] Phase 5 scheduler verified.
-......................................................................................

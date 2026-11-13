@@ -1,7 +1,7 @@
-# NEXUS OS Interrupt and Exception Handling Implementation
+# BharatOS Interrupt and Exception Handling Implementation
 
 ## Overview
-This document describes the implementation of CPU interrupt and exception handling added to NEXUS OS Phase 1. The implementation includes:
+This document describes the implementation of CPU interrupt and exception handling added to BharatOS Phase 1. The implementation includes:
 - Global Descriptor Table (GDT) setup
 - Interrupt Descriptor Table (IDT) setup  
 - Exception handlers for divide-by-zero, invalid opcode, general protection fault, page fault, and double fault
@@ -10,12 +10,12 @@ This document describes the implementation of CPU interrupt and exception handli
 
 ## Files Created
 
-### 1. `kernel/gdt.h` and `kernel/gdt.c`
+### 1. `kernel/arch/x86_64/gdt.h` and `kernel/arch/x86_64/gdt.c`
 - Implements Global Descriptor Table setup
 - Creates null, kernel code, and kernel data segments
 - Provides `gdt_init()` function to initialize and load the GDT
 
-### 2. `kernel/idt.h` and `kernel/idt.c`  
+### 2. `kernel/arch/x86_64/idt.h` and `kernel/arch/x86_64/idt.c`  
 - Implements Interrupt Descriptor Table setup
 - Configures IDT entries for specific interrupt vectors
 - Provides `idt_init()` function to initialize and load the IDT
@@ -27,7 +27,7 @@ This document describes the implementation of CPU interrupt and exception handli
   - Vector 14: Page fault
   - Vector 32: Timer interrupt (IRQ0)
 
-### 3. `kernel/interrupts.h` and `kernel/interrupts.c`
+### 3. `kernel/arch/x86_64/interrupts.h` and `kernel/arch/x86_64/interrupts.c`
 - Contains C-level interrupt handler functions
 - Implements specific handlers:
   - `divide_by_zero_handler()` - Prints error and halts
@@ -38,13 +38,13 @@ This document describes the implementation of CPU interrupt and exception handli
   - `timer_interrupt_handler()` - Acknowledges PIC and increments tick counter
 - Provides `interrupt_handler()` - Common dispatcher that saves registers and calls specific handlers
 
-### 4. `kernel/timer.h` and `kernel/timer.c`
+### 4. `kernel/arch/x86_64/timer.h` and `kernel/arch/x86_64/timer.c`
 - Implements Programmable Interval Timer (PIT) initialization
 - Configures PIT channel 0 for ~100Hz square wave output
 - Provides `timer_init()` function
 - Timer interrupt handler outputs a dot every second for visual feedback
 
-### 5. `kernel/interrupt_asm.asm`
+### 5. `kernel/arch/x86_64/interrupt_asm.asm`
 - Assembly language interrupt stubs
 - Provides low-level interrupt handlers that:
   - Save processor registers
@@ -54,11 +54,11 @@ This document describes the implementation of CPU interrupt and exception handli
 
 ## Files Modified
 
-### `kernel/kernel.h`
+### `kernel/core/kernel.h`
 - Added prototypes for `gdt_init()`, `idt_init()`, `timer_init()`
 - Added prototype for `test_divide_by_zero()` (later removed)
 
-### `kernel/kernel.c`
+### `kernel/core/kernel.c`
 - Added initialization sequence in `kernel_main()`:
   1. Initialize GDT
   2. Initialize IDT  
@@ -68,11 +68,11 @@ This document describes the implementation of CPU interrupt and exception handli
 
 ### `build.py`
 - Added new source files to the build:
-  - `kernel/gdt.c`
-  - `kernel/idt.c` 
-  - `kernel/interrupts.c`
-  - `kernel/timer.c`
-  - `kernel/interrupt_asm.asm`
+  - `kernel/arch/x86_64/gdt.c`
+  - `kernel/arch/x86_64/idt.c` 
+  - `kernel/arch/x86_64/interrupts.c`
+  - `kernel/arch/x86_64/timer.c`
+  - `kernel/arch/x86_64/interrupt_asm.asm`
 - Updated build process to compile and link assembly files
 
 ## How It Works
@@ -128,7 +128,7 @@ The implementation was verified by:
 - Focus on core interrupt mechanism reliability
 - Error handlers provide diagnostic information before halting
 - Timer provides periodic heartbeat for verification
-- All code follows existing NEXUS OS coding conventions
+- All code follows existing BharatOS coding conventions
 - Maintains compatibility with Limine boot protocol
 ## Phase 3 corrections
 

@@ -1,13 +1,13 @@
-# NEXUS OS — Boot Output (Phase 5 build)
+# BharatOS — Boot Output (Phase 5 build)
 
-This is the complete serial console output of one NEXUS OS boot in QEMU.
+This is the complete serial console output of one BharatOS boot in QEMU.
 It was captured from `python build.py run` (legacy BIOS boot, 512 MiB RAM)
 on the Phase 5 build (commit `8239086`), and is reproduced verbatim from
 `output.txt`.
 
 > **About the capture.** It was taken from an 80-column terminal, so a few
 > long lines are clipped at the right edge (e.g. `(RAM-backe)`, `... ped`),
-> and the firmware banner overlaps the first NEXUS line. The kernel's full
+> and the firmware banner overlaps the first BHARAT line. The kernel's full
 > lines appear untruncated in `python build.py test` output.
 
 ## Results at a glance
@@ -47,7 +47,7 @@ SeaBIOS hands over to Limine, which loads the kernel.
 ```text
 SeaBIOS (version rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org)
 ============================================
-            N E X U S   O S
+            B H A R A T   O S
      Phase 5: Preemptive Scheduler0 PCI2.10 PnP PMM+1EFD1F90+1EF31F90 CA00
 ============================================                                   
 ```
@@ -429,7 +429,7 @@ Process and thread creation, the deterministic A/B ping-pong, register and stack
 [proc] thread_create (process terminated) failed: operation not allowed in current stae
 [test]   PASS  no new threads in a terminated process
 [test]   diagnostics for a freshly created thread:
-[NEXUS PROC] ------------------------------------------
+[BHARAT PROC] ------------------------------------------
   PID      : 1 (proc-a)
   TID      : 1 (t1)
   STATE    : READY
@@ -442,13 +442,13 @@ Process and thread creation, the deterministic A/B ping-pong, register and stack
 [test]   PASS  reaping removes the terminated threads and processes
 
 [test] --- Context switching: A <-> B ping-pong ---
-[NEXUS] Creating thread A
-[NEXUS] Creating thread B
+[BHARAT] Creating thread A
+[BHARAT] Creating thread B
 [test]   PASS  create two processes, one thread each
 
-[NEXUS] Process table before the first switch:
+[BHARAT] Process table before the first switch:
 ╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS PROCESS MANAGER                                                    ║
+║ BHARAT PROCESS MANAGER                                                   ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║ PID  TID  STATE       NAME       KSTACK TOP         RSP                  ║
 ║ 0    0    RUNNING     kmain      0xffffffff80227000 0xffffffff80226e00   ║
@@ -567,9 +567,9 @@ Process and thread creation, the deterministic A/B ping-pong, register and stack
 
 [test] ===== 83 passed, 0 failed =====
 
-[NEXUS] Process table after all tests (only the kernel remains):
+[BHARAT] Process table after all tests (only the kernel remains):
 ╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS PROCESS MANAGER                                                    ║
+║ BHARAT PROCESS MANAGER                                                   ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║ PID  TID  STATE       NAME       KSTACK TOP         RSP                  ║
 ║ 0    0    RUNNING     kmain      0xffffffff80227000 0xffffffff80226e00   ║
@@ -578,7 +578,7 @@ Process and thread creation, the deterministic A/B ping-pong, register and stack
 ╚══════════════════════════════════════════════════════════════════════════╝
 
 ╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS PROCESS MANAGER - Phase 4 results                                  ║
+║ BHARAT PROCESS MANAGER - Phase 4 results                                 ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║ Context Switch Test                                                      ║
 ║                                                                          ║
@@ -684,7 +684,7 @@ Timer-driven preemption, all-register preservation, round-robin order, fairness,
 [SCHED] tick=460 current=TID 295 (RUNNING) next=TID 296 (counter) reason=quantum expir6
 
 ╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS SCHEDULER  (live, refresh 1/4)                                     ║
+║ BHARAT SCHEDULER  (live, refresh 1/4)                                    ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║ TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ║
 ║ ───────────────────────────────────────────────────────────────────      ║
@@ -701,7 +701,7 @@ Timer-driven preemption, all-register preservation, round-robin order, fairness,
 ╚══════════════════════════════════════════════════════════════════════════╝
 
 ╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS SCHEDULER  (live, refresh 2/4)                                     ║
+║ BHARAT SCHEDULER  (live, refresh 2/4)                                    ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║ TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ║
 ║ ───────────────────────────────────────────────────────────────────      ║
@@ -718,7 +718,7 @@ Timer-driven preemption, all-register preservation, round-robin order, fairness,
 ╚══════════════════════════════════════════════════════════════════════════╝
 
 ╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS SCHEDULER  (live, refresh 3/4)                                     ║
+║ BHARAT SCHEDULER  (live, refresh 3/4)                                    ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║ TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ║
 ║ ───────────────────────────────────────────────────────────────────      ║
@@ -735,7 +735,7 @@ Timer-driven preemption, all-register preservation, round-robin order, fairness,
 ╚══════════════════════════════════════════════════════════════════════════╝
 
 ╔══════════════════════════════════════════════════════════════════════════╗
-║ NEXUS SCHEDULER  (live, refresh 4/4)                                     ║
+║ BHARAT SCHEDULER  (live, refresh 4/4)                                    ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║ TID  STATE      WORK             ITERATIONS  SWITCHES CPU TICKS          ║
 ║ ───────────────────────────────────────────────────────────────────      ║
@@ -755,7 +755,7 @@ Timer-driven preemption, all-register preservation, round-robin order, fairness,
 
 [test] ===== 26 passed, 0 failed =====
 
-NEXUS SCHEDULER
+BHARAT SCHEDULER
   Policy            : ROUND-ROBIN, quantum 2 ticks
   Timer ticks       : 703
   Scheduler calls   : 10747
@@ -766,7 +766,7 @@ NEXUS SCHEDULER
   Current thread    : TID 0
 
 ╔══════════════════════════════════════════════════════════════════════════╗
-║                     NEXUS SYSTEM STATUS                                  ║
+║                     BHARAT SYSTEM STATUS                                 ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║ Scheduler       : ROUND-ROBIN (quantum 20 ms)                            ║
 ║ CPU             : x86-64, 1 CPU                                          ║

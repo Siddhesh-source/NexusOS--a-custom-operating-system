@@ -1,4 +1,4 @@
-# NEXUS OS — Phase 4: Processes, Threads & Context Switching
+# BharatOS — Phase 4: Processes, Threads & Context Switching
 
 Phase 4 adds the execution model that the scheduler (Phase 5), userspace and
 syscalls will build on: processes, kernel threads with their own kernel
@@ -14,7 +14,7 @@ other synchronisation primitives.
 ## Architecture
 
 ```text
-                 NEXUS Kernel
+                 BHARAT Kernel
                       │
              ┌────────┴────────┐
              │                 │
@@ -36,11 +36,11 @@ other synchronisation primitives.
 
 | File | Role |
 |---|---|
-| `kernel/proc.h`, `proc.c` | process/thread model, registry, lifecycle, `thread_switch`, diagnostics |
-| `kernel/context.h`, `context.asm` | x86-64 CPU context layout, `context_switch`, `thread_trampoline` |
-| `kernel/kstack.h`, `kstack.c` | kernel-stack allocator (PMM frames + VMM mappings + guard + canary) |
-| `kernel/proc_test.c`, `context_test.asm` | deterministic boot-time tests and the summary panel |
-| `kernel/box.c` | fixed-width box drawing for diagnostics |
+| `kernel/proc/proc.h`, `proc.c` | process/thread model, registry, lifecycle, `thread_switch`, diagnostics |
+| `kernel/arch/x86_64/context.h`, `context.asm` | x86-64 CPU context layout, `context_switch`, `thread_trampoline` |
+| `kernel/proc/kstack.h`, `kstack.c` | kernel-stack allocator (PMM frames + VMM mappings + guard + canary) |
+| `kernel/tests/proc_test.c`, `context_test.asm` | deterministic boot-time tests and the summary panel |
+| `kernel/lib/box.c` | fixed-width box drawing for diagnostics |
 
 ## Process and thread model
 
@@ -190,7 +190,7 @@ the following:
 - The trampoline calls `thread_bootstrap(t)`, which enables interrupts, runs
   `entry(arg)`, and passes the return value to `thread_exit`.
 
-**Exit (Phase 5 update).** Once the scheduler is running, `thread_exit` hands the CPU to the scheduler (see [scheduler.md](scheduler.md)). Before that, during the Phase 4 boot tests, `thread_exit` marks the thread TERMINATED and switches to its
+**Exit (Phase 5 update).** Once the scheduler is running, `thread_exit` hands the CPU to the scheduler (see [scheduler.md](phase-5-scheduler.md)). Before that, during the Phase 4 boot tests, `thread_exit` marks the thread TERMINATED and switches to its
 `exit_to` thread (the creator). If that thread isn't READY, it falls back to
 kmain, then to any READY thread. This is the one spot where Phase 5's
 scheduler will take over.
@@ -240,7 +240,7 @@ process and boot thread are static.
 
 ## Primitives for the Phase 5 scheduler
 
-| Spec name | NEXUS function |
+| Spec name | BHARAT function |
 |---|---|
 | `create_thread()` | `thread_create()` |
 | `destroy_thread()` | `thread_destroy()` (after `thread_terminate` / exit) |

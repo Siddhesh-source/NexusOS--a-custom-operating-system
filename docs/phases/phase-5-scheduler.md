@@ -1,6 +1,6 @@
-# NEXUS OS — Phase 5: Preemptive Scheduler
+# BharatOS — Phase 5: Preemptive Scheduler
 
-Phase 5 makes NEXUS multitask on its own: kernel threads are switched
+Phase 5 makes BHARAT multitask on its own: kernel threads are switched
 automatically by the hardware timer, without calling any switch or yield
 function. It reuses the Phase 4 thread model and context switch unchanged.
 
@@ -12,11 +12,11 @@ interrupts.
 
 | File | Role |
 |---|---|
-| `kernel/sched.h`, `sched.c` | ready queue, sleep list, idle thread, `sched_tick`, `schedule`, stats, tracing |
-| `kernel/timer.c` | PIT IRQ0 handler: EOI, then `sched_tick()` |
-| `kernel/proc.c` | reports every thread state change to the scheduler (`sched_state_changed`) |
-| `kernel/cpu.h` | `IRQ_GUARD()` critical sections |
-| `kernel/sched_test.c`, `sched_spin.asm` | tests, live dashboard, final status panel |
+| `kernel/sched/sched.h`, `sched.c` | ready queue, sleep list, idle thread, `sched_tick`, `schedule`, stats, tracing |
+| `kernel/arch/x86_64/timer.c` | PIT IRQ0 handler: EOI, then `sched_tick()` |
+| `kernel/proc/proc.c` | reports every thread state change to the scheduler (`sched_state_changed`) |
+| `kernel/arch/x86_64/cpu.h` | `IRQ_GUARD()` critical sections |
+| `kernel/tests/sched_test.c`, `sched_spin.asm` | tests, live dashboard, final status panel |
 
 The scheduler schedules **threads**. Processes remain containers: a
 process's address space is loaded when one of its threads is switched in.
