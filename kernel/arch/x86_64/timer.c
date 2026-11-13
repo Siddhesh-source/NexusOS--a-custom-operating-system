@@ -4,7 +4,7 @@
 #include "interrupts.h"
 #include "gdt.h"
 #include "cpu.h"
-#include "sched.h"
+
 
 volatile uint64_t timer_ticks = 0;
 
@@ -68,19 +68,14 @@ void timer_irq(void)
 {
     timer_ticks++;
 
-    /* Heartbeat dot every 100 ticks (~1 second) until the scheduler takes
-     * over the console; afterwards it would split other threads' lines. */
-    if (!sched_active() && timer_ticks % 100 == 0)
+    /* Heartbeat dot every 100 ticks (~1 second) during early boot. */
+    if (timer_ticks % 100 == 0)
         serial_puts(".");
 
-    /* EOI BEFORE scheduling: sched_tick may switch to another thread, and
-     * this handler might not finish until the interrupted thread is picked
-     * again. The PIC must keep delivering IRQ0 in the meantime. Interrupts
-     * stay disabled (interrupt gate) until the next thread re-enables them,
-     * so this cannot nest. */
+    /* The PIT only runs during early boot. Once the APICs are on (before
+     * the scheduler starts) the PIC is masked and this is never called
+     * again; the scheduler runs on the APIC timer (clock.c). */
     outb(PIC_MASTER_CMD, 0x20);
-
-    sched_tick();
 }
 
 void timer_wait(uint32_t ticks)

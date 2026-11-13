@@ -105,8 +105,9 @@ struct thread {
     struct thread *sched_prev;
     struct thread *sched_next;
     uint8_t sched_list;           /* SCHED_LIST_* */
-    uint64_t wake_tick;           /* sleeping: tick at which to wake */
-    uint64_t cpu_ticks;           /* timer ticks that hit while RUNNING */
+    uint64_t wake_ns;             /* sleeping: clock time at which to wake */
+    uint64_t cpu_ns;              /* time spent RUNNING */
+    uint64_t cpu_ticks;           /* cpu_ns in scheduler ticks (10 ms) */
     uint64_t preempted_count;     /* times the timer took the CPU away */
 };
 

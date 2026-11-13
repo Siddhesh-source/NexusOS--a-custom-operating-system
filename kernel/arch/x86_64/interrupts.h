@@ -15,8 +15,17 @@ struct interrupt_frame {
     uint64_t rip, cs, rflags, rsp, ss;
 };
 
-#define ISR_STUB_COUNT 33   /* vectors 0-31 (exceptions) + 32 (timer) */
+#define ISR_STUB_COUNT 256  /* every vector has a stub */
 extern const uint64_t isr_stub_table[ISR_STUB_COUNT];
+
+/* Handler for a vector >= 32 (device or timer interrupt). It runs with
+ * interrupts off and must send its own end-of-interrupt. */
+typedef void (*interrupt_handler_t)(struct interrupt_frame *frame);
+void interrupt_set_handler(uint8_t vector, interrupt_handler_t fn);
+
+/* Interrupts that arrived and were ignored: legacy PIC spurious IRQs and
+ * the APIC spurious vector. */
+uint64_t interrupt_spurious_count(void);
 
 /* Called from isr_common for every vector. */
 void interrupt_dispatch(struct interrupt_frame *frame);

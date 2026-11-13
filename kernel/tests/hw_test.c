@@ -4,6 +4,13 @@
 #include "fbcon.h"
 #include "kprintf.h"
 #include "string.h"
+#include "apic.h"
+#include "clock.h"
+#include "cpu.h"
+#include "interrupts.h"
+#include "sched.h"
+#include "timer.h"
+#include "trace.h"
 
 static unsigned passed, failed;
 
@@ -111,6 +118,152 @@ static void test_fbcon(void)
     CHECK(lit != dark, "a character's pixels are drawn in the text colour");
 }
 
+/* ---- APIC, clock and the tickless scheduler ----------------------------- */
+
+static void test_apic_and_clock(void)
+{
+    kprintf("\n[hw] APIC and clock\n");
+    CHECK(pic_is_masked() && inb(0x21) == 0xFF && inb(0xA1) == 0xFF,
+          "both 8259 PICs are fully masked");
+    CHECK(lapic_read(0x0F0) & (1u << 8), "local APIC is software-enabled");
+    CHECK(ioapic_line_count() >= 16, "I/O APIC lines cover the 16 ISA IRQs");
+
+    struct clock_info ci;
+    clock_get_info(&ci);
+    kprintf("  reference %s, TSC %lu Hz, APIC timer %lu Hz\n", ci.reference, ci.tsc_hz,
+            ci.apic_timer_hz);
+    CHECK(ci.tsc_hz > 100000000ULL && ci.tsc_hz < 20000000000ULL, "TSC rate is plausible (0.1-20 GHz)");
+    CHECK(ci.apic_timer_hz > 1000000ULL, "APIC timer rate is plausible (> 1 MHz)");
+
+    uint64_t a = clock_now_ns();
+    clock_delay_ns(2000000);
+    uint64_t b = clock_now_ns();
+    CHECK(b - a >= 2000000 && b - a < 50000000, "clock advances: a 2 ms delay measures 2 ms or a little more");
+}
+
+static void test_sleep_accuracy(void)
+{
+    kprintf("\n[hw] Sleep accuracy (one-shot alarms)\n");
+    static const uint64_t waits[] = { 1000000, 3000000, 7000000, 15000000, 40000000 };
+    /* Lateness has two parts: how late the alarm interrupt arrives (the
+     * timer hardware, or under QEMU the host's timer service), and how long
+     * the kernel then takes to get the sleeper running (ours). */
+    /* Under QEMU the first part is the host's timer service: on Windows
+     * hosts it runs on a ~1 ms grid, so interrupts arrive 0-1 ms late no
+     * matter what the guest does. The host can also pause the virtual CPU
+     * at random, adding noise to single samples. So each length is slept
+     * 5 times and judged by its best run (as benchmarks are): noise is
+     * filtered while a real, repeatable delay would still show. */
+    enum { TRIES = 5 };
+    uint64_t worst_total = 0, worst_kernel = 0, worst_any = 0;
+    bool never_early = true;
+    for (unsigned i = 0; i < sizeof(waits) / sizeof(waits[0]); i++) {
+        uint64_t best_total = ~0ULL, best_kernel = ~0ULL, best_irq = ~0ULL;
+        for (unsigned k = 0; k < TRIES; k++) {
+            uint64_t t0 = clock_now_ns();
+            sched_sleep_ns(waits[i]);
+            uint64_t took = clock_now_ns() - t0;
+            never_early = never_early && took + 50000 >= waits[i];   /* 50 us slack */
+            uint64_t late = took > waits[i] ? took - waits[i] : 0;
+            struct clock_info ci;
+            clock_get_info(&ci);
+            uint64_t kernel = late > ci.last_late_ns ? late - ci.last_late_ns : 0;
+            if (late < best_total)
+                best_total = late;
+            if (kernel < best_kernel)
+                best_kernel = kernel;
+            if (ci.last_late_ns < best_irq)
+                best_irq = ci.last_late_ns;
+            if (late > worst_any)
+                worst_any = late;
+        }
+        if (best_total > worst_total)
+            worst_total = best_total;
+        if (best_kernel > worst_kernel)
+            worst_kernel = best_kernel;
+        kprintf("  sleep %2lu ms -> best of %d: woke %4lu us late; alarm interrupt %4lu us late; "
+                "kernel wake-up %3lu us\n", waits[i] / 1000000, TRIES, best_total / 1000,
+                best_irq / 1000, best_kernel / 1000);
+    }
+    kprintf("  worst (best of %d): %lu us end to end, %lu us in the kernel; "
+            "worst single sample %lu us\n", TRIES, worst_total / 1000, worst_kernel / 1000,
+            worst_any / 1000);
+    CHECK(never_early, "no sleep ends early");
+    CHECK(worst_kernel < 1000000, "the kernel wakes a sleeper within 1 ms of its alarm (best of 5)");
+    CHECK(worst_total < 2000000,
+          "end to end, every sleep length ends within 2 ms (best of 5; the host timer adds up to ~1 ms)");
+    CHECK(worst_any < 10000000, "no single sleep is more than 10 ms late (emulator noise included)");
+}
+
+static void test_tickless_idle(void)
+{
+    kprintf("\n[hw] Tickless idle\n");
+    struct sched_stats s0, s1;
+    uint64_t pit0 = timer_ticks;
+    sched_get_stats(&s0);
+    sched_sleep_ns(500000000);              /* only kmain exists: idle runs */
+    sched_get_stats(&s1);
+    uint64_t events = s1.timer_events - s0.timer_events;
+    uint64_t idle_events = s1.idle_timer_events - s0.idle_timer_events;
+    struct clock_info ci;
+    clock_get_info(&ci);
+    kprintf("  idle: %lu timer interrupt(s) in 500 ms (a 100 Hz tick would give 50); "
+            "early alarms so far: %lu\n", events, ci.alarms_early);
+    /* One interrupt is the wake-up. A second can happen when the alarm
+     * fires a little early (the APIC timer and the TSC drift slightly
+     * apart, notably under emulation) and the scheduler re-arms it. */
+    if (events > 1)
+        trace_dump(12);   /* show which alarms were set and fired */
+    CHECK(events <= 2 && idle_events <= 2,
+          "500 ms of idle costs at most 2 timer interrupts (wake-up, plus one re-arm if early)");
+    CHECK(s1.idle_ticks - s0.idle_ticks >= 45, "the idle thread really ran for the 500 ms");
+    CHECK(timer_ticks == pit0, "the old PIT timer no longer interrupts");
+}
+
+static volatile uint64_t routed_irqs;
+
+static void routed_handler(struct interrupt_frame *f)
+{
+    (void)f;
+    routed_irqs++;
+    lapic_eoi();
+}
+
+#define TEST_VECTOR 0x50
+
+/* The PIT still counts at 100 Hz in the background. Route its line (ISA
+ * IRQ 0, which ACPI says arrives on global interrupt 2) through the I/O
+ * APIC and count what arrives; then mask it again. */
+static void test_ioapic_routing(void)
+{
+    kprintf("\n[hw] I/O APIC routing\n");
+    interrupt_set_handler(TEST_VECTOR, routed_handler);
+    /* Rate-generator mode (2): exactly one pulse per period, so exactly
+     * one edge per period reaches the I/O APIC. */
+    outb(0x43, 0x34);                        /* channel 0, lo/hi, mode 2 */
+    outb(0x40, 11931 & 0xFF);                /* 1193182 / 11931 = 100 Hz */
+    outb(0x40, 11931 >> 8);
+    routed_irqs = 0;
+    CHECK(ioapic_route_irq(0, TEST_VECTOR), "route ISA IRQ 0 (PIT) to vector 0x50");
+    uint64_t h0 = clock_hpet_ns(), c0 = clock_now_ns();
+    sched_sleep_ns(100000000);
+    uint64_t got = routed_irqs;
+    kprintf("  window: %lu us by TSC clock, %lu us by HPET\n",
+            (clock_now_ns() - c0) / 1000, (clock_hpet_ns() - h0) / 1000);
+    CHECK(ioapic_mask_irq(0, true), "mask the line again");
+    sched_sleep_ns(50000000);
+    kprintf("  %lu PIT interrupt(s) arrived through the I/O APIC in 100 ms\n", got);
+    CHECK(got >= 5 && got <= 15, "about 10 interrupts in 100 ms at 100 Hz");
+    /* Back to the boot-time square wave (mode 3), still masked. */
+    outb(0x43, 0x36);
+    outb(0x40, 11931 & 0xFF);
+    outb(0x40, 11931 >> 8);
+    CHECK(routed_irqs == got, "none arrive once masked");
+    CHECK(!ioapic_route_irq(200, TEST_VECTOR) && !ioapic_route_irq(1, 8),
+          "a line no I/O APIC serves, or an exception vector, is refused");
+    interrupt_set_handler(TEST_VECTOR, NULL);
+}
+
 bool hw_run_tests(void)
 {
     passed = failed = 0;
@@ -118,6 +271,10 @@ bool hw_run_tests(void)
     test_acpi();
     test_pci();
     test_fbcon();
+    test_apic_and_clock();
+    test_sleep_accuracy();
+    test_tickless_idle();
+    test_ioapic_routing();
     kprintf("\n===== Hardware tests: %u passed, %u failed =====\n", passed, failed);
     return failed == 0;
 }

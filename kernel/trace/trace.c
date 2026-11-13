@@ -18,6 +18,8 @@ static const char *const type_names[TRACE_TYPE_COUNT] = {
     [TRACE_PAGE_FAULT]    = "page.fault",
     [TRACE_HEAP_GROW]     = "heap.grow",
     [TRACE_TEST]          = "test",
+    [TRACE_ALARM_SET]     = "alarm.set",
+    [TRACE_ALARM_FIRE]    = "alarm.fire",
 };
 
 const char *trace_type_name(trace_type_t type)

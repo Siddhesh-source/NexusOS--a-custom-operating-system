@@ -18,6 +18,8 @@
 #include "acpi.h"
 #include "pci.h"
 #include "hw_test.h"
+#include "apic.h"
+#include "clock.h"
 #include "kprintf.h"
 #include "cpu.h"
 
@@ -162,7 +164,7 @@ void kernel_main(void)
 
     serial_puts("\n============================================\n");
     serial_puts("           B H A R A T   O S\n");
-    serial_puts("   Phase 6: Debug and Hardening Tools\n");
+    serial_puts("  Phase 7-8: Hardware and Memory\n");
     serial_puts("============================================\n\n");
 
     serial_puts("[boot] CPU entered long mode (64-bit).\n");
@@ -226,6 +228,13 @@ void kernel_main(void)
     kstack_init();
     proc_init();
     bool proc_ok = proc_run_tests();
+
+    /* Phase 7: leave the 1980s timer behind. Mask the PIC, turn on the
+     * local and I/O APICs, calibrate the clock, and give the scheduler a
+     * one-shot alarm instead of a periodic tick. */
+    if (!apic_init())
+        panic("this machine has no APIC described by ACPI; BharatOS needs one");
+    clock_init(sched_timer_event);
 
     /* Phase 5: preemptive scheduling. The boot flow (TID 0) is already the
      * registered current thread; from here on it is scheduled like any
