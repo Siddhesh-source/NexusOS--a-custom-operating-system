@@ -553,12 +553,13 @@ static bool live_wait_check(void)
     proc_status_t err;
     if (thread_create(process_kernel(), "checkwait", check_waiter, NULL, &err) == NULL)
         return false;
-    for (unsigned i = 0; i < 50 && waitq_sleepers(&check_wq) == 0; i++)
+    /* Generous waits (up to 3 s each): slow hosts run guest CPUs in turn. */
+    for (unsigned i = 0; i < 300 && waitq_sleepers(&check_wq) == 0; i++)
         sched_sleep(1);
     bool slept = waitq_sleepers(&check_wq) == 1;
     check_flag = true;
     waitq_wake_all(&check_wq);
-    for (unsigned i = 0; i < 100 && !check_woke; i++)
+    for (unsigned i = 0; i < 300 && !check_woke; i++)
         sched_sleep(1);
     return slept && check_woke;
 }

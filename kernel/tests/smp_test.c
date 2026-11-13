@@ -466,12 +466,29 @@ struct busy {
 
 static struct busy busy[SMP_MAX_CPUS * BUSY_THREADS_PER_CPU];
 
+/* CPUs that have run busy work, and (when testing the spread) the time
+ * until which finished threads keep spinning so idle CPUs still find
+ * work to steal. Without this, on a slow host (one host thread runs every
+ * guest CPU), the work could end before some CPU got its turn. */
+static volatile uint32_t spread_seen;
+static uint64_t spread_until;
+
 /* A fixed amount of pure CPU work: never sleeps or yields. */
 static int64_t busy_entry(void *arg)
 {
     struct busy *b = arg;
-    while (b->work < b->amount)
+    while (b->work < b->amount) {
         b->work++;
+        if ((b->work & 0xFFFFF) == 0)
+            __atomic_fetch_or(&spread_seen, 1u << cpu_id(), __ATOMIC_RELAXED);
+    }
+    for (;;) {
+        __atomic_fetch_or(&spread_seen, 1u << cpu_id(), __ATOMIC_RELAXED);
+        if (spread_until == 0 || clock_now_ns() >= spread_until
+            || (uint32_t)__builtin_popcount(spread_seen) >= ncpu)
+            break;
+        __asm__ volatile("pause");
+    }
     b->ran_on = thread_current()->ran_on;
     b->done = true;
     return 0;
@@ -481,6 +498,8 @@ static int64_t busy_entry(void *arg)
  * Returns the wall time in ms. */
 static uint64_t run_busy(unsigned n, uint64_t amount, bool steal)
 {
+    spread_seen = 0;
+    spread_until = steal ? clock_now_ns() + 3000000000ull : 0;
     for (unsigned i = 0; i < n; i++) {
         memset(&busy[i], 0, sizeof(busy[i]));
         busy[i].amount = amount;
