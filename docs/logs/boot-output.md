@@ -1087,3 +1087,192 @@ Live checks, now:
 All good: 516 boot checks and 8 live checks passed.
 tester@bharat:~$
 ```
+
+## Phase 11 additions (V1 desktop)
+
+The screen now starts with a splash (the boot log runs below it), and a
+desktop suite runs after the shell's. Then the desktop thread starts next
+to the text console. The boot test types `tester` into the graphical
+login on the emulated PS/2 keyboard, presses Shift+F12 for the quick
+tour, and saves a screenshot. Captured with `python build.py test`
+(4 CPUs):
+
+```text
+[test] ===== Phase 11: desktop =====
+
+[test] --- Drawing ---
+[test]   PASS  a filled rectangle covers exactly its pixels
+[test]   PASS  drawing stays inside the clip rectangle
+[test]   PASS  a rectangle off the surface draws nothing (and does not crash)
+[test]   PASS  text: 'H' is 8 pixels wide, its stroke drawn, its middle gap left
+[test]   PASS  rectangle union and intersection
+[test]   PASS  present copies only the damaged rectangle
+[test]   PASS  the boot splash moved on at every boot step
+
+[test] --- Text buffer ---
+[test]   PASS  a 10x3 buffer is made; a 0-wide one is refused
+[test]   PASS  text and newline land in the right cells
+[test]   PASS  a long line wraps; the oldest line scrolls away
+[test]   PASS  escape codes clear the screen and move home
+[test]   PASS  box-drawing characters become - | and others ?
+[test]   PASS  the window manager starts (drawing into memory only)
+
+[test] --- Login screen ---
+[test]   PASS  a name with spaces is refused with a message
+[test]   PASS  a user with a password is asked for it
+[test]   PASS  a wrong password is refused
+[desktop] tester logged in.
+[test]   PASS  a plain name logs in
+[test]   PASS  the desktop is drawn with the app buttons on the top bar
+
+[test] --- Windows ---
+[test]   PASS  two windows open; the newer one has the focus
+[test]   PASS  focus moves to the window brought forward
+[test]   PASS  clicking a title bar focuses the window; dragging moves it
+[test]   PASS  a window cannot be moved off the screen
+[test]   PASS  moving the pointer redraws only a small damaged area
+[test]   PASS  nothing changed: nothing is redrawn
+[test]   PASS  windows can be opened up to the limit, then are refused
+[test]   PASS  the x closes a window; focus goes back
+[test]   PASS  the top bar opens an app, and a second click does not open it twice
+[test]   PASS  F3 opens the Monitor
+[test]   PASS  Ctrl+W closes the focused window
+
+[test] --- Terminal window ---
+[test]   PASS  a command typed in the window runs; its output and a new prompt appear
+[test]   PASS  the shell's folder and prompt follow cd
+[test]   PASS  clear empties the window
+[test]   PASS  logout in a terminal closes it
+
+[test] --- Files and the text editor ---
+[test]   PASS  Files opens in the user's home folder
+[test]   PASS  New file asks for a name, creates it and selects it
+[test]   PASS  New folder creates a folder
+[test]   PASS  a '/' cannot be typed into a name
+[test]   PASS  Delete removes the selected folder
+[test]   PASS  Enter opens a folder
+[test]   PASS  Backspace goes up again
+[test]   PASS  Enter on a file opens it in the text editor
+[test]   PASS  typing, arrows, Home, End and Backspace edit at the cursor
+[test]   PASS  Ctrl+S saves the file
+[test]   PASS  the editor refuses a missing file and a folder
+[test]   PASS  files and folders made by the test are deleted again
+
+[test] --- Monitor, Health and About ---
+[test]   PASS  the monitor samples every CPU (busy between 0 and 100%)
+[test]   PASS  CPU 0's bar is drawn
+[test]   PASS  Health runs the live checks and shows the result
+[test]   PASS  About shows what the system is
+[desktop] tester logged out.
+[test]   PASS  Log out returns to the login screen
+
+===== Desktop tests: 50 passed, 0 failed =====
+...
+[ok] Phase 10 login and shell verified.
+[ok] Phase 11 desktop verified.
+[ok] 566 boot self-checks passed, 0 failed.
+...
+[desktop] Login screen ready (type your name in the QEMU window).
+tester
+
+Welcome to BharatOS!
+
+Type 'help' to see what you can do. Your files are in memory: they are
+kept while the machine runs and start fresh at the next boot.
+
+Hello, tester! Type 'help' to see what you can do.
+tester@bharat:~$ echo typed at the prompt > t.txt
+tester@bharat:~$ cat t.txt
+typed at the prompt
+tester@bharat:~$ QEMU 11.1.0 monitor - type 'help' for more information
+(qemu) sendkey t
+(qemu) sendkey e
+(qemu) sendkey s
+(qemu) sendkey t
+(qemu) sendkey e
+(qemu) sendkey r
+(qemu) sendkey ret
+(qemu)
+[desktop] tester logged in.
+[desktop] Desktop ready for tester.
+(qemu) sendkey shift-f12
+(qemu)
+[tour] Starting the quick tour of the desktop.
+[tour] Terminal: files and CPUs
+[tour] check passed: Terminal
+[tour] check passed: hello from the tour
+[tour] Files: create, open, edit and delete
+[tour] check passed: Files
+[tour] check passed: Files shows the file
+[tour] check passed: the edited file was saved
+[tour] check passed: Files shows the file
+[tour] Monitor: a busy thread on every CPU
+[tour] check passed: Monitor
+[tour] Busiest CPU over the last second: 85%
+[tour] check passed: the monitor shows the load
+[tour] Health: checks, the lock-order checker, a contained crash
+[tour] check passed: Health
+[tour] check passed: All good
+
+[lockcheck] Lock order problem on CPU 0:
+[lockcheck]   taking "demo A" while holding "demo B"
+[lockcheck]   but earlier "demo A" was held while taking "demo B".
+[lockcheck]   Two CPUs doing these at the same time would each wait
+[lockcheck]   for the other forever (a deadlock).
+[lockcheck] Earlier order ("demo A" then "demo B", CPU 0):
+Call trace (most recent call first):
+  #0 0xffffffff80206dbd  demo_lock_pair+0x2d
+  #1 0xffffffff80206716  cmd_lockdemo+0x66
+  #2 0xffffffff802044bf  shell_run+0x2af
+  #3 0xffffffff8020326f  health_run+0x8f
+  #4 0xffffffff802340e5  tour_tick+0x2c5
+  #5 0xffffffff802325ff  desktop_main+0x10f
+  #6 0xffffffff80216caa  thread_bootstrap+0x2a
+  #7 0xffffffff80235e85  thread_trampoline+0x8
+[lockcheck] Now:
+Call trace (most recent call first):
+  #0 0xffffffff8021afcf  lock_irqs_off+0x8f
+  #1 0xffffffff80206dbd  demo_lock_pair+0x2d
+  #2 0xffffffff8020673a  cmd_lockdemo+0x8a
+  #3 0xffffffff802044bf  shell_run+0x2af
+  #4 0xffffffff8020326f  health_run+0x8f
+  #5 0xffffffff802340e5  tour_tick+0x2c5
+  #6 0xffffffff802325ff  desktop_main+0x10f
+  #7 0xffffffff80216caa  thread_bootstrap+0x2a
+[tour] check passed: The checker caught it
+
+[#PF] Page fault
+[#PF]   faulting address : 0x0000000000000000 (null page)
+[#PF]   instruction ptr  : 0xffffffff80206e29
+[#PF]   error code       : 0x0 [P=0 W=0 U=0 RSVD=0 I/D=0]
+[#PF]   access           : read
+[#PF]   mode             : kernel
+[#PF]   cause            : page not present
+
+[crash] Thread "crashdemo" (TID 350) crashed: Page fault (#PF)
+[crash] It touched address 0x0000000000000000, which is not usable memory.
+[crash] Registers:
+  rip=0xffffffff80206e29 cs=0008 rflags=0x0000000000010297
+  rsp=0xffffe0000005ffb0 ss=0010
+  rax=0x0000000000000000 rbx=0x0000000000000000 rcx=0x0000000000000000
+  rdx=0x0000000000000000 rsi=0x0000000000000001 rdi=0x0000000000000000
+  rbp=0xffffe0000005ffc0 r8 =0x0000000000000000 r9 =0x00000000000037df
+  r10=0x00000000000006f0 r11=0x0000000000000000 r12=0xffff800000aca930
+  r13=0x0000000000000000 r14=0x0000000000000000 r15=0x0000000000000000
+  cr2=0x0000000000000000 cr3=0x000000001fd94000
+Call trace (most recent call first):
+  #0 0xffffffff80206e29  crash_thread+0x39
+  #1 0xffffffff80216caa  thread_bootstrap+0x2a
+  #2 0xffffffff80235e85  thread_trampoline+0x8
+[crash] Only this thread was stopped; the rest of the system keeps running.
+[tour] check passed: The crash was contained
+[tour] About
+[tour] check passed: About
+[tour] Demo finished (0 checks failed).
+(qemu) screendump build/desktop.ppm
+(qemu)
+checks
+... (the checks table: every suite, then 8 live checks) ...
+All good: 566 boot checks and 8 live checks passed.
+tester@bharat:~$
+```

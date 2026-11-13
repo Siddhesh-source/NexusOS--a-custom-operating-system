@@ -8,8 +8,8 @@ itself, and is made for the people who use it.**
 ![Architecture](https://img.shields.io/badge/arch-x86--64-blue)
 ![Language](https://img.shields.io/badge/language-C%20%7C%20NASM-informational)
 ![Boot](https://img.shields.io/badge/boot-Limine%20(BIOS%20%2B%20UEFI)-orange)
-![Tests](https://img.shields.io/badge/boot%20tests-516%20passing-brightgreen)
-![Status](https://img.shields.io/badge/progress-Phase%2010%20of%2023-yellow)
+![Tests](https://img.shields.io/badge/boot%20tests-566%20passing-brightgreen)
+![Status](https://img.shields.io/badge/progress-Phase%2011%20of%2023-yellow)
 
 </div>
 
@@ -24,13 +24,13 @@ simple, solid engineering.
 
 | | What it means for you | Status |
 |---|---|---|
-| ✅ **Checks itself on every boot** | 516 health checks run inside the kernel each time it starts; problems are reported, never hidden | working today |
-| 💬 **Explains itself** | `why slow`, `why crash`: plain sentences from real system data, offline | Phase 12 |
-| ↩️ **Undo for your files** | saves never overwrite data, so power cuts can't corrupt files and every change can be undone | Phase 14 |
-| 🔒 **Apps ask first** | apps start with no access; you allow or deny; every use is logged | Phase 15 |
-| 🇮🇳 **Made for Bharat** | runs in 128 MB of RAM, works offline, speaks Hindi and Marathi | Phase 19 |
+| ✅ **Checks itself on every boot** | 566 health checks run inside the kernel each time it starts; problems are reported, never hidden, and shown on the desktop | working today |
+| 💬 **Explains itself** | `why slow`, `why crash`: plain sentences from real system data, offline | Phase 15 |
+| ↩️ **Undo for your files** | saves never overwrite data, so power cuts can't corrupt files and every change can be undone | Phase 17 |
+| 🔒 **Apps ask first** | apps start with no access; you allow or deny; every use is logged | Phase 18 |
+| 🇮🇳 **Made for Bharat** | runs in 128 MB of RAM, works offline, speaks Hindi and Marathi | Phase 22 |
 
-All of it comes together in a clean, simple desktop (Phase 18).
+A first desktop works today (V1: windows, Terminal, Files, Monitor, Health); the full one comes in Phase 21.
 More detail: [Project overview](docs/PROJECT_OVERVIEW.md).
 
 ## What works today
@@ -53,6 +53,9 @@ More detail: [Project overview](docs/PROJECT_OVERVIEW.md).
 [ok] Phase 10 input verified.
 [ok] Phase 10 files in memory verified.
 [ok] Phase 10 login and shell verified.
+[ok] Phase 11 desktop verified.
+[desktop] Login screen ready (type your name in the QEMU window).
+[desktop] Desktop ready for asha.
 
 BharatOS login: asha
 Hello, asha! Type 'help' to see what you can do.
@@ -63,7 +66,7 @@ hi
 
 | Area | What's implemented |
 |---|---|
-| **Boot** | Limine (BIOS and UEFI), 64-bit kernel in high memory, serial console and text on screen |
+| **Boot** | Limine (BIOS and UEFI), 64-bit kernel in high memory, serial console, a splash screen whose progress bar follows the real boot steps |
 | **Hardware** | ACPI tables (CPUs, interrupt controllers, HPET, PCIe), PCI device scan, local and I/O APIC |
 | **CPU** | crash handlers for all 32 CPU errors with full reports, emergency stack for double faults, calibrated clock with one-shot alarms |
 | **Memory** | buddy page allocator, slab caches, kernel heap, own page tables (read-only code, no-execute data), one address space per process, pages allocated on first touch, copy-on-write, shareable memory objects |
@@ -71,9 +74,11 @@ hi
 | **Threads** | processes and kernel threads, own guarded stack per thread, assembly context switch |
 | **Scheduler** | preemptive time-sharing (20 ms slices), tickless (an idle CPU gets no timer interrupts), idle thread, sleep, live statistics |
 | **Safety** | crashes of a demo thread are reported and contained (the system keeps running), guard pages, stack canaries, compiler stack protector, heap poisoning and red zones (use-after-free and overflow caught), corrupted-state detection, interrupt-safe allocators |
-| **Input** | PS/2 keyboard and mouse, plus typing in a terminal (serial), all as one event queue; threads sleep until a key arrives |
+| **Input** | PS/2 keyboard and mouse for the desktop, typing in a terminal (serial) for the text console, both at once; threads sleep until a key arrives |
 | **Files** | files and folders in memory, filled at boot from a bundle on the disk; size limits checked |
 | **Terminal** | login with your name, a shell with 24 commands (`ls cat echo > cd mkdir rm cpus top ps kill checks lockdemo crashdemo` ...), history with the arrow keys |
+| **Desktop** | graphical login with your name; windows you can focus, drag and close; a top bar with your apps, CPU count, health badge and clock; drawn in memory and copied to the screen only where it changed |
+| **Apps** | Terminal (the shell in a window), Files (open, create, delete), Text editor, Monitor (every CPU's load live, work stealing), Health (checks, lock-order and crash demos with their reports), About; a scripted tour (F12) |
 | **Debugging** | crash reports with named call traces and the last 16 kernel events, GDB/LLDB attach mode, host unit tests, benchmarks, size and boot-time budgets, CI |
 
 Full boot log: [docs/logs/boot-output.md](docs/logs/boot-output.md)
@@ -86,14 +91,18 @@ Full boot log: [docs/logs/boot-output.md](docs/logs/boot-output.md)
 git clone https://github.com/Siddhesh-source/NexusOS--a-custom-operating-system.git
 cd NexusOS--a-custom-operating-system
 python scripts/fetch_limine.py     # one-time: download the bootloader
-python build.py run                # build and boot in QEMU
+python build.py demo               # build and boot with the desktop in a QEMU window
 ```
+
+Type your name in the window and press Enter. Click into the window to
+use the mouse (Ctrl+Alt+G lets it go); F12 starts a tour of the desktop.
 
 Quit QEMU with **Ctrl+A**, then **X**.
 
 | Command | What it does |
 |---|---|
 | `python build.py` | Build the kernel and bootable disk image |
+| `python build.py demo` | Boot with the desktop in a QEMU window and the text console in the terminal; `--auto` logs in and runs the tour by itself |
 | `python build.py run` | Boot in QEMU (BIOS) in the terminal; log in and type commands there |
 | `python build.py run --window` | Same, plus a QEMU window showing the screen (type in either) |
 | `python build.py run-uefi` | Boot through UEFI firmware (OVMF) |
@@ -157,7 +166,7 @@ Design details: [high-level design](docs/design/HLD.md) ·
 
 ## Testing
 
-Every boot runs **516 checks** inside the kernel, then logs in and types commands at the real prompt:
+Every boot runs **566 checks** inside the kernel, then logs in and types commands at the real prompt, logs in to the desktop with the emulated keyboard, runs the quick desktop tour (which checks its own results) and checks a screenshot:
 
 | Suite | Checks | Highlights |
 |---|---|---|
@@ -171,11 +180,12 @@ Every boot runs **516 checks** inside the kernel, then logs in and types command
 | Input | 32 | key, terminal and mouse decoding, full queue, keys through the real IRQ 1 / IRQ 12 path, sleeping readers |
 | Files | 46 | paths, create/read/write/list/delete, bad paths, every size limit, the boot bundle |
 | Login and shell | 58 | line editor, login rules, scripted commands with checked output, contained crashes |
+| Desktop | 50 | drawing and clipping, damage-only redraws, windows (focus, drag, close, limits), login screen, every app driven by keys and clicks |
 
 Outside the kernel, `python build.py unit` runs about **2.8 million** checks
 on the real heap and scheduler code (random operations against a model),
 plus 1.26 million on the buddy allocator and slab caches,
-and `test-faults` crashes the kernel on purpose 12 ways to check every
+and `test-faults` crashes the kernel on purpose 13 ways to check every
 report. CI builds and boots every pull request.
 
 All suites pass under BIOS and UEFI with zero compiler warnings.
@@ -188,7 +198,7 @@ All suites pass under BIOS and UEFI with zero compiler warnings.
 - [x] **8:** memory that scales: buddy, slab, demand paging, copy-on-write
 - [x] **9:** multi-core: per-CPU queues, spinlocks with lock-order checking, TLB shootdown, RCU
 - [x] **10:** V1 core: keyboard and mouse, files in RAM, login with your name, terminal
-- [ ] **11:** V1 desktop and demo: windows, taskbar, Terminal, Files, System Monitor, Health
+- [x] **11:** V1 desktop and demo: windows, top bar, Terminal, Files, editor, Monitor, Health, tour
 - [ ] **12:** V1 hardening: thorough tests, fuzzing, screenshots, real hardware
 - [ ] **13–14:** user mode with handles and async rings; microkernel IPC and services
 - [ ] **15:** self-check and explain (`why`)
@@ -221,10 +231,11 @@ Step-by-step plan with tests for each phase: [docs/ROADMAP.md](docs/ROADMAP.md)
 │   ├── proc/             processes, threads, kernel stacks
 │   ├── sched/            scheduler (per-CPU run queues), wait queues
 │   ├── smp/              CPU start-up, per-CPU data, spinlocks, IPIs, RCU
-│   ├── drivers/          serial, screen console
+│   ├── drivers/          serial, screen console, real-time clock
 │   ├── input/            keyboard, mouse and serial input, event queue
 │   ├── fs/               files in memory (ramfs) and the boot bundle
-│   ├── apps/             V1 apps as kernel threads: login console, shell
+│   ├── apps/             V1 apps: login console, shell, and the desktop apps
+│   ├── ui/               graphics, boot splash, window manager, desktop, tour
 │   ├── lib/              kprintf, string, box drawing
 │   ├── trace/            call traces (symbol table) and the event trace
 │   ├── include/          limine.h
