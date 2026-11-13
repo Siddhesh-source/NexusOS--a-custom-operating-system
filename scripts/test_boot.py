@@ -26,6 +26,7 @@ REQUIRED = [
     "[ok] Phase 10 input verified.",
     "[ok] Phase 10 files in memory verified.",
     "[ok] Phase 10 login and shell verified.",
+    "[ok] Phase 11 desktop verified.",
 ]
 
 # CPUs QEMU gives the kernel (build.py --smp sets this).
@@ -107,25 +108,52 @@ def cmd_for(image: Path) -> List[str]:
 
 
 # After the boot checks pass, a short session typed at the real login
-# prompt: (text to wait for, keys to send). Each wait looks only at output
-# that came after the previous step, so a prompt seen earlier does not
-# count again. Serial input proves typed keys reach the shell through
-# IRQ 4; "\x01c" switches QEMU's console to its monitor, where `sendkey`
-# presses keys on the emulated PS/2 keyboard (IRQ 1), then back.
+# prompts: (text to wait for, keys to send). Each wait looks only at
+# output that came after the previous step, so a prompt seen earlier does
+# not count again. Serial input proves typed keys reach the text console
+# through IRQ 4. "\x01c" switches QEMU's console to its monitor, where
+# `sendkey` presses keys on the emulated PS/2 keyboard (IRQ 1), which the
+# desktop reads: the name goes into the graphical login screen, then
+# Shift+F12 runs the quick desktop tour (it checks its own results and
+# prints [FAIL] lines if anything is wrong), then `screendump` saves the
+# screen to a file that is checked afterwards (see check_screenshot).
 PROMPT = "tester@bharat:~$ "
-SESSION = [
-    ("BharatOS login: ", "tester\n"),
-    (PROMPT, "echo typed at the prompt > t.txt\n"),
-    (PROMPT, "cat t.txt\n"),
-    ("typed at the prompt", None),
-    # The monitor echoes its own commands around the typed letters, so
-    # check for a phrase only the command's output contains.
-    (PROMPT, "\x01c" + "".join(f"sendkey {k}\n" for k in "about") + "sendkey ret\n" + "\x01c"),
-    ("Self-checks:", None),
-    (PROMPT, "checks\n"),
-    ("All good", None),
-    (PROMPT, None),
-]
+SCREENSHOT = "desktop.ppm"     # written next to the disk image
+
+
+def session(shot: Path) -> List[tuple]:
+    mon = lambda cmds: "\x01c" + "".join(c + "\n" for c in cmds) + "\x01c"
+    return [
+        ("BharatOS login: ", "tester\n"),
+        (PROMPT, "echo typed at the prompt > t.txt\n"),
+        (PROMPT, "cat t.txt\n"),
+        ("typed at the prompt", None),
+        (PROMPT, mon([f"sendkey {k}" for k in "tester"] + ["sendkey ret"])),
+        ("[desktop] Desktop ready for tester.", mon(["sendkey shift-f12"])),
+        ("[tour] Demo finished (0 checks failed).",
+         mon([f"screendump {shot.as_posix()}"]) + "checks\n"),
+        ("All good", None),
+        (PROMPT, None),
+    ]
+
+
+def check_screenshot(shot: Path) -> bool:
+    """The screen QEMU saved must be the desktop: a white top bar, the
+    desktop background below, and many colours (windows, text)."""
+    try:
+        data = shot.read_bytes()
+        magic, size, maxval, pixels = data.split(b"\n", 3)
+        w, h = map(int, size.split())
+        assert magic == b"P6" and maxval == b"255" and len(pixels) >= w * h * 3
+    except Exception as e:      # missing, short or not a PPM file
+        print(f"[FAIL] screenshot {shot} unreadable: {e}")
+        return False
+    px = lambda x, y: tuple(pixels[(y * w + x) * 3:(y * w + x) * 3 + 3])
+    colours = {px(x, y) for y in range(0, h, 7) for x in range(0, w, 7)}
+    ok = px(2, 2) == (0xFF, 0xFF, 0xFF) and px(2, h - 2) == (0xF7, 0xF6, 0xF2) and len(colours) >= 8
+    print(f"[{'PASS' if ok else 'FAIL'}] screenshot {shot.name}: {w}x{h}, {len(colours)} colours sampled, "
+          f"top bar {px(2, 2)}, background {px(2, h - 2)}")
+    return ok
 
 
 def boot_and_watch(image: Path, required: List[str], forbidden: List[str],
@@ -221,9 +249,13 @@ def boot_and_watch(image: Path, required: List[str], forbidden: List[str],
     return success, text.replace("\r", ""), boot_seconds or time.time() - started
 
 
-def run_boot_test(image: Path, timeout: int = 120) -> int:
-    success, full, seconds = boot_and_watch(image, REQUIRED, FORBIDDEN, timeout, SESSION)
+def run_boot_test(image: Path, timeout: int = 180) -> int:
+    shot = image.parent / SCREENSHOT
+    shot.unlink(missing_ok=True)
+    success, full, seconds = boot_and_watch(image, REQUIRED, FORBIDDEN, timeout, session(shot))
     print("=" * 60)
+    if success and not check_screenshot(shot):
+        return 1
     if success:
         from budgets import check_budgets
         if not check_budgets(seconds):
@@ -237,7 +269,9 @@ def run_boot_test(image: Path, timeout: int = 120) -> int:
         print("[PASS] Phase 8 memory-that-scales tests passed.")
         print(f"[PASS] Phase 9 multi-core tests passed ({QEMU_SMP} CPUs).")
         print("[PASS] Phase 10 input, files, login and shell tests passed.")
-        print("[PASS] Keys typed at the login prompt (serial and PS/2 keyboard) reached the shell.")
+        print("[PASS] Phase 11 desktop tests passed.")
+        print("[PASS] Keys typed over serial reached the shell; PS/2 keys logged in to the desktop.")
+        print("[PASS] The quick desktop tour ran start to finish with every check passing.")
         return 0
     print("[FAIL] Boot did not complete cleanly.")
     for m in FORBIDDEN:

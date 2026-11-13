@@ -710,7 +710,7 @@ static int cmd_about(struct shell *sh, int argc, char **argv)
     selftest_totals(&bp, &bf);
     struct pmm_stats ps;
     pmm_get_stats(&ps);
-    P("BharatOS V1 core: keyboard, mouse, files in memory, login and terminal\n");
+    P("BharatOS V1: a desktop with windows, files in memory, login and terminal\n");
     P("An operating system written from scratch for x86-64 PCs, in C and assembly.\n");
     P("  CPUs:        %u, each with its own run queue; idle CPUs steal work\n", smp_cpu_count());
     P("  Memory:      %lu MiB; buddy page allocator, slab caches, demand paging\n",

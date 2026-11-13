@@ -39,11 +39,13 @@ void serial_init(void)
 }
 
 /* Optional second output (the screen console), fed every byte. */
-static void (*mirror)(char c);
+static serial_mirror_t mirror;
 
-void serial_set_mirror(void (*fn)(char c))
+serial_mirror_t serial_set_mirror(serial_mirror_t fn)
 {
+    serial_mirror_t old = mirror;
     mirror = fn;
+    return old;
 }
 
 void serial_putchar(char c)

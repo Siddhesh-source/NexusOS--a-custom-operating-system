@@ -25,8 +25,11 @@ uint64_t console_lock(void);
 void console_unlock(uint64_t flags);
 
 /* Send a copy of every byte written to the serial port to `fn` as well
- * (used by the screen console). NULL turns it off. */
-void serial_set_mirror(void (*fn)(char c));
+ * (the screen console; the Health window while it runs a demo). NULL
+ * turns it off. Returns the previous one. `fn` is called with the console
+ * lock held. */
+typedef void (*serial_mirror_t)(char c);
+serial_mirror_t serial_set_mirror(serial_mirror_t fn);
 
 /* Receiving: turn on the "byte received" interrupt (the caller routes
  * IRQ 4), and take one received byte if there is one. */

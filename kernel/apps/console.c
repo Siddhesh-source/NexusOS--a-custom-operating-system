@@ -8,6 +8,7 @@
 #include "serial.h"
 #include "kprintf.h"
 #include "string.h"
+#include "heap.h"
 
 /* ---- login rules ------------------------------------------------------------ */
 
@@ -30,28 +31,34 @@ bool login_check(const char *user, const char *password, bool *needs_password)
     *needs_password = false;
     if (!login_name_ok(user))
         return false;
-    static char users[2048];             /* only the console thread logs in */
+    /* The console and the desktop may both log someone in at once, so
+     * each call reads the list into its own buffer. */
+    const size_t cap = 2048;
+    char *users = kmalloc(cap);
     size_t len = 0;
-    if (fs_read_file("/etc/users", users, sizeof(users) - 1, &len) != FS_OK)
-        return true;                     /* no list: everyone is welcome */
+    if (users == NULL || fs_read_file("/etc/users", users, cap - 1, &len) != FS_OK) {
+        kfree(users);
+        return users != NULL;            /* no list: everyone is welcome */
+    }
     users[len] = '\0';
     size_t ul = strlen(user);
+    bool ok = true;
     for (char *line = users; *line != '\0';) {
         char *end = strchr(line, '\n');
         if (end != NULL)
             *end = '\0';
         if (line[0] != '#' && strncmp(line, user, ul) == 0 && line[ul] == ':') {
             const char *want = line + ul + 1;
-            if (want[0] == '\0')
-                return true;             /* listed with no password */
-            *needs_password = true;
-            return password != NULL && strcmp(password, want) == 0;
+            *needs_password = want[0] != '\0';   /* listed with no password: welcome */
+            ok = !*needs_password || (password != NULL && strcmp(password, want) == 0);
+            break;
         }
         if (end == NULL)
             break;
         line = end + 1;
     }
-    return true;
+    kfree(users);
+    return ok;
 }
 
 /* ---- the console thread ------------------------------------------------------- */
@@ -157,7 +164,7 @@ static int64_t console_main(void *arg)
     le_init(&le, console_out, NULL);
     say("\n\x1b[2J\x1b[H");
     say("============================================\n");
-    say("   B H A R A T   O S   -   V1 core\n");
+    say("   B H A R A T   O S   -   V1\n");
     say("============================================\n");
     say("Log in with any name (letters and digits). Example: asha\n");
     for (;;)

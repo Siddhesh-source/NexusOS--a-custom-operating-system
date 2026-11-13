@@ -8,9 +8,16 @@
 /* ---- the queue ---------------------------------------------------------- */
 
 static struct spinlock input_lock = SPINLOCK_INIT(LOCK_CLASS_INPUT);
-static struct waitq input_wq = WAITQ_INIT;
-static struct input_event ring[INPUT_QUEUE_SIZE];
-static unsigned head, count;           /* oldest event, events queued */
+
+/* Two queues: the text console's (serial, tests) and, once the desktop
+ * runs, the desktop's (PS/2 keyboard and mouse). */
+struct input_queue {
+    struct input_event ring[INPUT_QUEUE_SIZE];
+    unsigned head, count;              /* oldest event, events queued */
+    struct waitq wq;
+};
+static struct input_queue console_q = { .wq = WAITQ_INIT }, desktop_q = { .wq = WAITQ_INIT };
+static bool desktop_on;
 static struct input_stats stats;
 static int32_t screen_w = 1024, screen_h = 768;
 static int32_t mouse_x = 512, mouse_y = 384;
@@ -19,7 +26,16 @@ void input_init(void)
 {
     uint64_t f;
     spin_lock_irqsave(&input_lock, &f);
-    head = count = 0;
+    console_q.head = console_q.count = desktop_q.head = desktop_q.count = 0;
+    spin_unlock_irqrestore(&input_lock, f);
+}
+
+void input_set_desktop(bool on)
+{
+    uint64_t f;
+    spin_lock_irqsave(&input_lock, &f);
+    desktop_on = on;
+    desktop_q.head = desktop_q.count = 0;
     spin_unlock_irqrestore(&input_lock, f);
 }
 
@@ -48,8 +64,10 @@ bool input_push(const struct input_event *ev)
     bool queued = false;
     uint64_t f;
     spin_lock_irqsave(&input_lock, &f);
-    if (count < INPUT_QUEUE_SIZE) {
-        struct input_event *slot = &ring[(head + count) % INPUT_QUEUE_SIZE];
+    struct input_queue *q = desktop_on && (ev->source == INPUT_SRC_PS2_KBD
+        || ev->source == INPUT_SRC_PS2_MOUSE) ? &desktop_q : &console_q;
+    if (q->count < INPUT_QUEUE_SIZE) {
+        struct input_event *slot = &q->ring[(q->head + q->count) % INPUT_QUEUE_SIZE];
         *slot = *ev;
         slot->time_ns = clock_ready() ? clock_now_ns() : 0;
         if (ev->type == INPUT_MOUSE) {
@@ -62,7 +80,7 @@ bool input_push(const struct input_event *ev)
         } else {
             stats.keys++;
         }
-        __atomic_store_n(&count, count + 1, __ATOMIC_RELEASE);
+        __atomic_store_n(&q->count, q->count + 1, __ATOMIC_RELEASE);
         stats.pushed++;
         queued = true;
     } else {
@@ -70,20 +88,20 @@ bool input_push(const struct input_event *ev)
     }
     spin_unlock_irqrestore(&input_lock, f);
     if (queued)
-        waitq_wake_all(&input_wq);
+        waitq_wake_all(&q->wq);
     return queued;
 }
 
-bool input_poll(struct input_event *out)
+static bool poll_queue(struct input_queue *q, struct input_event *out)
 {
     bool got = false;
     uint64_t f;
     spin_lock_irqsave(&input_lock, &f);
-    if (count > 0) {
+    if (q->count > 0) {
         if (out != NULL)
-            *out = ring[head];
-        head = (head + 1) % INPUT_QUEUE_SIZE;
-        count--;
+            *out = q->ring[q->head];
+        q->head = (q->head + 1) % INPUT_QUEUE_SIZE;
+        q->count--;
         stats.read++;
         got = true;
     }
@@ -91,16 +109,26 @@ bool input_poll(struct input_event *out)
     return got;
 }
 
+bool input_poll(struct input_event *out)
+{
+    return poll_queue(&console_q, out);
+}
+
+bool input_desktop_poll(struct input_event *out)
+{
+    return poll_queue(&desktop_q, out);
+}
+
 static bool has_event(void *arg)
 {
     (void)arg;
-    return __atomic_load_n(&count, __ATOMIC_ACQUIRE) > 0;
+    return __atomic_load_n(&console_q.count, __ATOMIC_ACQUIRE) > 0;
 }
 
 void input_wait(struct input_event *out)
 {
     for (;;) {
-        waitq_wait(&input_wq, has_event, NULL);
+        waitq_wait(&console_q.wq, has_event, NULL);
         if (input_poll(out))
             return;
     }
@@ -126,7 +154,7 @@ void input_get_stats(struct input_stats *out)
     uint64_t f;
     spin_lock_irqsave(&input_lock, &f);
     *out = stats;
-    out->queued = count;
+    out->queued = console_q.count;
     spin_unlock_irqrestore(&input_lock, f);
 }
 

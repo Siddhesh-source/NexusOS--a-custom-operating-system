@@ -16,6 +16,7 @@
 #include "debug_test.h"
 #include "bench.h"
 #include "fbcon.h"
+#include "splash.h"
 #include "acpi.h"
 #include "pci.h"
 #include "hw_test.h"
@@ -37,6 +38,8 @@
 #include "shell_test.h"
 #include "selftest.h"
 #include "console.h"
+#include "desktop.h"
+#include "desktop_test.h"
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -204,17 +207,16 @@ static void load_boot_bundle(void)
     kprintf("[fs] no boot bundle; starting with empty folders\n");
 }
 
-/* Mirror the console to the screen, if the bootloader set up a
- * framebuffer we can draw on. */
-static void start_screen_console(void)
+/* The boot splash, with the console mirrored to the screen below it, if
+ * the bootloader set up a framebuffer we can draw on. */
+static void start_screen(void)
 {
     struct limine_framebuffer_response *r = framebuffer_request.response;
     if (r == NULL || r->framebuffer_count == 0)
         return;
     struct limine_framebuffer *f = r->framebuffers[0];
-    if (!fbcon_init(f->address, f->width, f->height, f->pitch, f->bpp,
-                    f->red_mask_shift, f->green_mask_shift, f->blue_mask_shift))
-        serial_puts("[fbcon] framebuffer format not supported; serial only\n");
+    splash_start(f->address, f->width, f->height, f->pitch, f->bpp,
+                 f->red_mask_shift, f->green_mask_shift, f->blue_mask_shift);
 }
 
 void kernel_main(void)
@@ -222,11 +224,11 @@ void kernel_main(void)
     /* Per-CPU data first: locks and the console need cpu_id(). */
     percpu_init_boot();
     serial_init();
-    start_screen_console();
+    start_screen();
 
     serial_puts("\n============================================\n");
     serial_puts("           B H A R A T   O S\n");
-    serial_puts("  Phase 10: V1 core (input, files, login, terminal)\n");
+    serial_puts("  Phase 11: V1 desktop (windows, apps, demo)\n");
     serial_puts("============================================\n\n");
 
     serial_puts("[boot] CPU entered long mode (64-bit).\n");
@@ -285,11 +287,13 @@ void kernel_main(void)
     pci_init();
 
     bool mm_ok = mm_run_tests();
+    splash_step("Checking threads");
 
     /* Phase 4: processes, threads, context switching */
     kstack_init();
     proc_init();
     bool proc_ok = proc_run_tests();
+    splash_step("Waking the other CPUs");
 
     /* Phase 7: leave the 1980s timer behind. Mask the PIC, turn on the
      * local and I/O APICs, calibrate the clock, and give the scheduler a
@@ -311,39 +315,46 @@ void kernel_main(void)
      * off until the multi-core tests turn it on: their threads all stay
      * on this CPU while the others are online and idle. */
     smp_init((void *)mp_request.response);
+    splash_step("Checking the scheduler");
 
     bool sched_ok = sched_run_tests();
+    splash_step("Checking the debugging tools");
 
     /* Phase 6: debugging and hardening tools. They are active from boot;
      * this only checks them. */
     bool debug_ok = debug_run_tests();
+    splash_step("Checking the hardware");
 
     /* Phase 7: modern hardware (ACPI, PCI, screen console, APIC timer). */
     bool hw_ok = hw_run_tests();
+    splash_step("Checking memory paging");
 
     /* Phase 8: buddy allocator, slab caches, demand paging, copy-on-write. */
     bool vm_ok = vm_run_tests();
+    splash_step("Checking the CPUs working together");
 
     /* Phase 9: multi-core (locks, lock order, IPIs, TLB shootdown, RCU,
      * per-CPU queues with work stealing). */
     bool smp_ok = smp_run_tests();
+    splash_step("Checking keyboard and mouse");
 
     /* Phase 10: V1 core. Keyboard, mouse and serial input. */
     inputdev_init();
     bool input_ok = input_run_tests();
+    splash_step("Loading files");
 
     /* Phase 10: files in memory, seeded from the boot bundle. */
     load_boot_bundle();
     bool fs_ok = fs_run_tests(fs_bundle_loaded);
-    {
-        struct fbcon_info fi;
-        fbcon_get_info(&fi);
-        if (fi.active)
-            input_set_screen((int32_t)fi.width, (int32_t)fi.height);
-    }
+    splash_step("Checking the shell");
 
     /* Phase 10: login rules, line editor and the shell's commands. */
     bool shell_ok = shell_run_tests();
+    splash_step("Checking the desktop");
+
+    /* Phase 11: graphics, windows and the desktop apps, drawn in memory. */
+    bool desktop_ok = desktop_run_tests();
+    splash_step("Ready");
 
     serial_puts("\n[ok] Kernel started successfully.\n");
     if (mm_ok)
@@ -386,6 +397,10 @@ void kernel_main(void)
         serial_puts("[ok] Phase 10 login and shell verified.\n");
     else
         serial_puts("[FAIL] Phase 10 login and shell tests reported failures.\n");
+    if (desktop_ok)
+        serial_puts("[ok] Phase 11 desktop verified.\n");
+    else
+        serial_puts("[FAIL] Phase 11 desktop tests reported failures.\n");
     {
         unsigned passed, failed;
         selftest_totals(&passed, &failed);
@@ -398,12 +413,15 @@ void kernel_main(void)
     /* From here on every CPU shares the work. */
     sched_set_stealing(true);
 
-    /* V1: the console app (login, then the shell). kmain then just checks
-     * on it once a second and restarts it if it crashed; it sleeps in
+    /* V1: the console app (login, then the shell) on serial, and the
+     * desktop on the screen. kmain then just checks on them once a second
+     * and restarts one that crashed; it sleeps in
      * between, so the idle thread (not this loop) halts the CPU. */
     console_start();
+    desktop_start();
     for (;;) {
         sched_sleep(SCHED_TIMER_HZ);
         console_watch();
+        desktop_watch();
     }
 }

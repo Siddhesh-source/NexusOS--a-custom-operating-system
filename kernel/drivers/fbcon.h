@@ -12,7 +12,12 @@
  * the last row it continues at the top, and each new line is cleared just
  * before it is written. The row being written is always the newest.
  *
- * Limits: 32-bit-per-pixel framebuffers only; one console; no cursor. */
+ * During boot the console uses only the lower part of the screen (the
+ * boot splash is drawn above it, fbcon_set_top). When the desktop starts
+ * it stops the console (fbcon_stop); a kernel panic brings it back over
+ * the whole screen (fbcon_resume) so the report can be read.
+ *
+ * Limits: 32-bit-per-pixel framebuffers only; one console. */
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -34,7 +39,17 @@ bool fbcon_init(void *addr, uint64_t width, uint64_t height, uint64_t pitch,
 void fbcon_putc(char c);
 void fbcon_get_info(struct fbcon_info *out);
 
-/* Colour of one pixel (0x00RRGGBB), for self-tests. */
+/* Use only the screen below `top` pixels (at least 25 rows must remain;
+ * false and no change otherwise). Clears the console area. */
+bool fbcon_set_top(uint64_t top);
+
+/* Stop drawing (the desktop owns the screen now). */
+void fbcon_stop(void);
+
+/* Panic only: take the whole screen back and draw again. */
+void fbcon_resume(void);
+
+/* Colour of one pixel of the console area (0x00RRGGBB), for self-tests. */
 uint32_t fbcon_read_pixel(uint64_t x, uint64_t y);
 
 #endif /* BHARAT_FBCON_H */
