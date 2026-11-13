@@ -35,7 +35,7 @@ python build.py run                 # boot in QEMU (BIOS), serial in terminal; q
 python build.py run-uefi            # boot through UEFI firmware
 python build.py test                # build + boot + check all self-tests and budgets (exit 0 = pass)
 python build.py test-faults         # build 12 crash-on-purpose kernels, check each report
-python build.py unit                # host unit tests: heap and scheduler code, millions of cases
+python build.py unit                # host unit tests: heap, scheduler, buddy, slab (millions of cases)
 python build.py bench               # benchmarks -> appends a row to docs/benchmarks.md
 python build.py debug               # QEMU paused for GDB on :1234; then: gdb -x scripts/bharat.gdb
 python build.py clean
@@ -43,7 +43,7 @@ python build.py clean
 
 Run `python build.py test` after **every** change. Run `test-faults` after
 touching interrupts, memory, stacks or context switching, and `unit` after
-touching the heap, scheduler, trace or kprintf. On Windows, tool
+touching the heap, page allocator, slab, scheduler, trace or kprintf. On Windows, tool
 paths come from `.env` (`BHARAT_CLANG`, `BHARAT_NASM`, `BHARAT_QEMU`, ...;
 see `.env.example`).
 
@@ -56,12 +56,16 @@ scripts/                 fat32.py (disk image), test_boot.py (QEMU test harness)
 .github/workflows/       CI: one quick job (unit tests + one BIOS boot test)
 boot/limine.conf         boot menu
 kernel/
-  arch/x86_64/           CPU-specific: entry.asm, linker.ld, GDT/TSS, IDT, interrupts, PIT/PIC timer, context switch
+  arch/x86_64/           CPU-specific: entry.asm, linker.ld, GDT/TSS, IDT, interrupts, APIC,
+                         clock (calibration, one-shot alarms), early PIT/PIC, context switch
+  acpi/                  ACPI table parsing (MADT, HPET, MCFG)
+  pci/                   PCI scan (ECAM or I/O ports)
   core/                  kernel_main (boot order) and panic
-  mm/                    physical pages (pmm), page tables (vmm), heap, page faults, mm_init
+  mm/                    buddy allocator (pmm), slab caches, page tables (vmm), heap,
+                         memory objects/regions/demand paging/COW (vm), page faults
   proc/                  processes, threads, kernel stacks
   sched/                 scheduler
-  drivers/               device drivers (serial today)
+  drivers/               device drivers (serial, screen console)
   lib/                   kprintf, string, box drawing
   trace/                 call traces (backtrace.c + generated symbol table), event trace ring
   include/               third-party headers (limine.h)
@@ -120,8 +124,10 @@ compiled; every folder with a `.h` is on the include path. So:
 - Never commit phase work directly to `main`.
 - When the phase is complete and its tests pass: push the branch, open a
   PR to `main` with `gh pr create` (summary of what changed + test
-  results), then merge it (`gh pr merge --squash --delete-branch`, or
-  `--merge` if the commits are worth keeping separately), and pull `main`.
+  results), then merge it (`gh pr merge --squash`, or `--merge` if the
+  commits are worth keeping separately), and pull `main`.
+- **Never delete branches**, local or remote: no `--delete-branch`, no
+  `git branch -d`, no `git push --delete`. Every phase branch is kept.
 
 **Commits**
 - Commit in **batches**: one commit per logical group of finished,
@@ -137,6 +143,9 @@ compiled; every folder with a `.h` is on the include path. So:
     `build`, `tests`, `docs`, ...
   - Breaking changes: `type(scope)!:` plus a `BREAKING CHANGE:` line in
     the body.
+- **No AI attribution anywhere:** no `Co-Authored-By: Claude`, no
+  "Generated with Claude Code" lines, no AI watermark in commits, PRs,
+  code or docs. Commits use the repository owner's own git identity.
 - **Never mention phase numbers** in commit messages or PR titles.
   Describe what actually changed: `feat(arch): print symbolised call
   traces on panic`, not `Phase 6 step 2`.

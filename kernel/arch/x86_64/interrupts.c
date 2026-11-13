@@ -6,6 +6,7 @@
 #include "pagefault.h"
 #include "backtrace.h"
 #include "trace.h"
+#include "apic.h"
 
 static const char *const exception_names[32] = {
     "Divide-by-zero (#DE)",           "Debug (#DB)",
@@ -59,8 +60,33 @@ void exception_fatal(const struct interrupt_frame *f, const char *reason)
     halt_forever();
 }
 
+static interrupt_handler_t handlers[256];
+static uint64_t spurious;
+
+void interrupt_set_handler(uint8_t vector, interrupt_handler_t fn)
+{
+    if (vector >= 32)
+        handlers[vector] = fn;
+}
+
+uint64_t interrupt_spurious_count(void)
+{
+    return spurious;
+}
+
 void interrupt_dispatch(struct interrupt_frame *frame)
 {
+    if (frame->vector >= 32 && handlers[frame->vector] != NULL) {
+        handlers[frame->vector](frame);
+        return;
+    }
+    /* A masked 8259 PIC can still raise a "spurious" IRQ 7 or 15, and the
+     * local APIC its spurious vector. Neither needs an end-of-interrupt. */
+    if (frame->vector == APIC_SPURIOUS_VECTOR
+        || (pic_is_masked() && (frame->vector == 39 || frame->vector == 47))) {
+        spurious++;
+        return;
+    }
     switch (frame->vector) {
     case 14: /* Page fault */
         page_fault_handler(frame);

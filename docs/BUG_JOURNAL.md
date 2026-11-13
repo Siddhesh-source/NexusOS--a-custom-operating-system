@@ -111,3 +111,66 @@ New entries go at the end. Entries 1–7 come from Phases 2–5 (see
   padding, and leaves the saved RBP and return address intact so the call
   trace still works.
 - **Guarding test:** fault demo `smash`.
+
+### 10. Going tickless doubled the cost of a thread switch (Phase 7)
+- **Symptom:** the context-switch benchmark went from 1,927 to 4,506
+  cycles after the scheduler moved from a periodic tick to one-shot alarms.
+- **How found:** `python build.py bench`, compared with the previous row
+  in `docs/benchmarks.md`.
+- **Root cause:** almost every switch moved the slice end, so the
+  scheduler rewrote the APIC timer registers each time. Device-register
+  writes are slow (much slower under emulation).
+- **Fix:** lazy re-arming: reprogram only when a deadline moves earlier;
+  an early alarm just fires and the scheduler looks again (decision D20).
+  Back to about 2,300 cycles.
+- **Guarding test:** the benchmark table; unit test "a sleep with no
+  stale alarm takes exactly one alarm".
+
+### 11. QEMU's PIT gives two interrupts per period through the I/O APIC (Phase 7)
+- **Symptom:** routing the 100 Hz PIT through the I/O APIC delivered 20–21
+  interrupts in 100 ms instead of about 10.
+- **How found:** the I/O APIC routing self-test; the window was confirmed
+  to be 100 ms by both the TSC and the HPET, ruling out a clock error.
+- **Root cause:** in square-wave mode (3) QEMU raises and lowers the line
+  every half period, and its I/O APIC turns that into two deliveries per
+  period. In rate-generator mode (2) there is one short pulse per period.
+- **Fix:** the test programs the PIT in mode 2 while it is routed (and
+  restores mode 3 after).
+- **Guarding test:** "about 10 interrupts in 100 ms at 100 Hz".
+
+### 12. Waking a sleeper armed an extra "run now" alarm (Phase 7)
+- **Symptom:** a 5-tick sleep took 3 alarm interrupts in the host unit
+  test, where 1 (plus at most one stale one) was expected.
+- **How found:** `python build.py unit` (fake clock), then printing each
+  fired deadline: the same deadline fired twice.
+- **Root cause:** waking the sleeper inside the alarm handler reported
+  "a thread became READY while idle runs", which armed an alarm for
+  *now*; the handler then switched to that thread anyway, and with lazy
+  re-arming the pointless alarm stayed armed and fired again.
+- **Fix:** no arming while the alarm handler wakes sleepers; the
+  handler's own decision sets the alarm.
+- **Guarding test:** the same unit test (at most 2 alarms with a stale
+  one; exactly 1 without).
+
+### 13. A fault demo raced with the faster scheduler (Phase 8)
+- **Symptom:** `test-faults` failed for `tstack`: the stack overflow was
+  caught correctly, but the demo's own "[demo] Thread TID ..." line was
+  missing. It passed when run alone.
+- **How found:** reading the failed boot's output: the overflow report
+  came where the message should have been.
+- **Root cause:** creating the new thread makes it READY; the tickless
+  scheduler preempts the long-running creator within microseconds,
+  before it printed. The old 10 ms tick had hidden the race.
+- **Fix:** create the thread and print with interrupts off.
+- **Guarding test:** fault demo `tstack`.
+
+### 14. The slab cache was slower than the heap it replaces (Phase 8)
+- **Symptom:** the first benchmark gave 4,625 cycles for a slab object
+  against 2,606 for the same size from the heap.
+- **How found:** `python build.py bench` (the new `slab_176` column).
+- **Root cause:** the use-after-free check compared a freed slot one byte
+  at a time; the heap compares 8 bytes at a time.
+- **Fix:** compare 8-byte words. Now 2,284 cycles, about 14% faster than
+  the heap.
+- **Guarding test:** the benchmark table; `slab_check` and the slab
+  use-after-free tests still catch single-byte changes.

@@ -33,8 +33,18 @@ void serial_init(void)
     outb(port + REG_IER, 0x00);
 }
 
+/* Optional second output (the screen console), fed every byte. */
+static void (*mirror)(char c);
+
+void serial_set_mirror(void (*fn)(char c))
+{
+    mirror = fn;
+}
+
 void serial_putchar(char c)
 {
+    if (mirror != NULL)
+        mirror(c);
     uint16_t port = SERIAL_COM1;
     while ((inb(port + REG_LSR) & LSR_THRE) == 0)
         __asm__ volatile("pause");

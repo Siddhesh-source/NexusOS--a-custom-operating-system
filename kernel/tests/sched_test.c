@@ -749,7 +749,7 @@ static void final_panel(void)
     box_separator();
     box_line("Scheduler       : ROUND-ROBIN (quantum %d ms)", SCHED_QUANTUM_TICKS * 1000 / SCHED_TIMER_HZ);
     box_line("CPU             : x86-64, 1 CPU");
-    box_line("Timer           : ACTIVE, PIT %d Hz", SCHED_TIMER_HZ);
+    box_line("Timer           : APIC one-shot alarms (tickless)");
     box_line("%s", "");
     box_line("%-4s %-14s %12s %9s %10s %9s", "TID", "WORK", "ITERATIONS", "SWITCHES",
              "PREEMPTED", "CPU TICKS");

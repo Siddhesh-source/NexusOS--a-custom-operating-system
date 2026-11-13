@@ -107,8 +107,16 @@ ISR_ERR   29
 ISR_ERR   30
 ISR_NOERR 31
 
-; Timer interrupt (IRQ0 -> vector 32 after PIC remap)
-ISR_NOERR 32
+; Vectors 32-255: legacy PIC IRQs (32-47), APIC timer, devices, spurious.
+; None of them push an error code.
+%assign v 32
+%rep 224
+isr %+ v:
+    push    qword 0
+    push    qword v
+    jmp     isr_common
+%assign v v+1
+%endrep
 
 section .rodata
 align 8
@@ -117,7 +125,7 @@ align 8
 global isr_stub_table
 isr_stub_table:
 %assign i 0
-%rep 33
+%rep 256
     dq isr %+ i
 %assign i i+1
 %endrep

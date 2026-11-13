@@ -49,6 +49,7 @@ static void usage_snapshot(struct usage *u)
 {
     struct heap_stats hs;
     heap_get_stats(&hs);
+    proc_trim_caches();   /* empty slab pages kept for reuse are not leaks */
     u->pmm_free = pmm_free_page_count();
     u->heap_used = hs.used_bytes;
     u->stacks = kstack_slots_in_use();
@@ -623,13 +624,20 @@ static void test_memory(void)
 
     struct process *p = process_create("memtest", 0, &err);
     uint64_t free0 = pmm_free_page_count();
+    uint64_t slab0 = proc_cache_pages();
     struct thread *t = thread_create(p, "m", trivial_entry, NULL, &err);
-    ok &= CHECK(t != NULL && free0 - pmm_free_page_count() == KSTACK_SIZE / PAGE_SIZE,
-                "a thread's stack is exactly 4 PMM frames");
+    /* The thread record lives in a slab; the first one may bring a new
+     * slab page with it, which is accounted separately. */
+    uint64_t slab_pages = proc_cache_pages() - slab0;
+    ok &= CHECK(t != NULL && slab_pages <= 1
+                && free0 - pmm_free_page_count() == KSTACK_SIZE / PAGE_SIZE + slab_pages,
+                "a thread's stack is exactly 4 PMM frames (plus its record's slab page, if new)");
     pid_t memtest_pid = p->pid;
     thread_terminate(t);
     proc_reap();
-    ok &= CHECK(pmm_free_page_count() == free0, "destroying the thread returns them");
+    proc_trim_caches();
+    ok &= CHECK(pmm_free_page_count() == free0 + (slab0 - proc_cache_pages()),
+                "destroying the thread returns them");
     ok &= CHECK(process_find(memtest_pid) == NULL,
                 "the process was reaped together with its only thread");
     /* That reap destroyed p along with its only thread; use a fresh process.
@@ -757,9 +765,16 @@ static int64_t overflow_entry(void *arg)
 void proc_demo_thread_stack_overflow(void)
 {
     proc_status_t err;
-    struct thread *t = thread_create(process_kernel(), "overflow", overflow_entry, NULL, &err);
-    kprintf("\n[demo] Thread TID %u will recurse until it hits the guard below %p...\n",
-            t->tid, (void *)t->stack.base);
+    struct thread *t;
+    {
+        /* With interrupts off, the new (READY) thread cannot preempt us
+         * before the message is out: the tickless scheduler would switch
+         * to it within microseconds. */
+        IRQ_GUARD();
+        t = thread_create(process_kernel(), "overflow", overflow_entry, NULL, &err);
+        kprintf("\n[demo] Thread TID %u will recurse until it hits the guard below %p...\n",
+                t->tid, (void *)t->stack.base);
+    }
     thread_switch(t);
 }
 

@@ -19,7 +19,9 @@ ROOT = Path(__file__).resolve().parent.parent
 KERNEL_DIR = ROOT / "kernel"
 
 LIMITS = {
-    "kernel_lines": 8000,    # about 5,100 after Phase 6
+    # Raised from 8,000 when Phases 7-8 (ACPI, PCI, APIC, tickless clock,
+    # buddy, slab, demand paging, copy-on-write) took it to about 7,700.
+    "kernel_lines": 10000,
     "boot_seconds": 90,      # about 15 s locally; CI machines are slower
 }
 

@@ -5,9 +5,15 @@
  * state change goes through sched_state_changed(), and thread_switch()
  * makes the old thread READY (if it was RUNNING) and the new one RUNNING.
  * There is no real stack switch: after schedule() returns, the test simply
- * acts as whichever thread is now current. */
+ * acts as whichever thread is now current.
+ *
+ * The clock is fake too: time only moves when the test calls advance(),
+ * which fires the scheduler's one-shot alarm whenever its deadline is
+ * passed, like the APIC timer would. So the tests can also check that the
+ * scheduler is tickless: no alarm when there is nothing to do. */
 #include "unit.h"
 #include "sched.h"
+#include "clock.h"
 #include "proc.h"
 #include "kprintf.h"
 #include "string.h"
@@ -19,6 +25,43 @@ static struct thread threads[NTHREADS + 2];   /* [0] boot, [1] idle */
 static struct thread *current;
 static unsigned created;
 static struct process kernel_proc;
+
+/* ---- fake clock.c ------------------------------------------------------- */
+
+static uint64_t fake_now;
+static bool alarm_armed;
+static uint64_t alarm_at;
+static uint64_t alarms_fired;
+
+bool clock_ready(void) { return true; }
+uint64_t clock_now_ns(void) { return fake_now; }
+void clock_cancel_alarm(void) { alarm_armed = false; }
+
+void clock_set_alarm(uint64_t deadline_ns)
+{
+    alarm_armed = true;
+    alarm_at = deadline_ns;
+}
+
+/* Let `ns` of time pass, firing the alarm each time its deadline comes. */
+static void advance(uint64_t ns)
+{
+    uint64_t target = fake_now + ns;
+    while (alarm_armed && alarm_at <= target) {
+        if (alarm_at > fake_now)
+            fake_now = alarm_at;
+        alarm_armed = false;          /* one-shot */
+        alarms_fired++;
+        sched_timer_event();
+    }
+    fake_now = target;
+}
+
+/* One old-style "tick" worth of time. */
+static void tick(void)
+{
+    advance(SCHED_TICK_NS);
+}
 
 /* ---- fake proc.c -------------------------------------------------------- */
 
@@ -131,17 +174,17 @@ static void test_round_robin(void)
     struct thread *a = spawn(), *b = spawn(), *c = spawn();
     struct thread *order[4] = { current, a, b, c };
     unsigned next = 1;
-    for (unsigned tick = 1; tick <= 400; tick++) {
+    for (unsigned n = 1; n <= 400; n++) {
         struct thread *before = current;
-        sched_tick();
-        if (tick % SCHED_QUANTUM_TICKS == 0) {
+        tick();
+        if (n % SCHED_QUANTUM_TICKS == 0) {
             UCHECK(current == order[next % 4], "tick %u: expected TID %u, got TID %u",
-                   tick, order[next % 4]->tid, current->tid);
+                   n, order[next % 4]->tid, current->tid);
             next++;
         } else {
-            UCHECK(current == before, "tick %u: switched before the quantum ended", tick);
+            UCHECK(current == before, "tick %u: switched before the quantum ended", n);
         }
-        UCHECK(sched_check(), "tick %u: queue invariants", tick);
+        UCHECK(sched_check(), "tick %u: queue invariants", n);
     }
     /* Each worker exits when it next runs; then only boot is left. */
     while (current != order[0])
@@ -165,18 +208,36 @@ static void test_sleep_and_idle(void)
     struct sched_stats s0;
     sched_get_stats(&s0);
 
+    uint64_t fired0 = alarms_fired;
     sched_sleep(5);               /* only thread: CPU goes to idle */
     UCHECK(current == sched_idle_thread(), "sleeping alone switches to idle");
     for (unsigned i = 0; i < 4; i++) {
-        sched_tick();
+        tick();
         UCHECK(current == sched_idle_thread(), "still idle at tick %u of the sleep", i + 1);
     }
-    sched_tick();                 /* 5th tick: woken and run at once */
+    tick();                 /* 5th tick: woken and run at once */
     UCHECK(current == boot_thread, "sleeper runs again after exactly 5 ticks");
+    /* Lazy re-arming: an alarm left from before the sleep (an old slice
+     * end) may fire once; then only the wake-up. */
+    UCHECK(alarms_fired - fired0 <= 2, "tickless: the 5-tick sleep took at most 2 alarms (got %lu)",
+           alarms_fired - fired0);
+    UCHECK(!alarm_armed, "tickless: alone and with no sleepers, no alarm is armed");
+    uint64_t fired_again = alarms_fired;
+    sched_sleep(3);               /* nothing stale left now */
+    for (unsigned i = 0; i < 3; i++)
+        tick();
+    UCHECK(current == boot_thread && alarms_fired - fired_again == 1,
+           "tickless: a sleep with no stale alarm takes exactly one alarm (got %lu)",
+           alarms_fired - fired_again);
+    uint64_t fired1 = alarms_fired;
+    for (unsigned i = 0; i < 100; i++)
+        tick();
+    UCHECK(alarms_fired == fired1 && current == boot_thread,
+           "tickless: a second of running alone causes no timer interrupts");
 
     struct sched_stats s1;
     sched_get_stats(&s1);
-    UCHECK(s1.idle_ticks - s0.idle_ticks == 5, "5 idle ticks counted (got %lu)",
+    UCHECK(s1.idle_ticks - s0.idle_ticks == 8, "8 idle ticks counted, 5 + 3 (got %lu)",
            s1.idle_ticks - s0.idle_ticks);
     UCHECK(sched_check(), "invariants after sleep");
 
@@ -196,7 +257,7 @@ static void test_random(uint64_t seed)
     for (unsigned op = 0; op < RANDOM_OPS; op++) {
         unsigned r = (unsigned)unit_rand_below(100);
         if (r < 60) {
-            sched_tick();
+            tick();
         } else if (r < 70) {
             sched_yield();
         } else if (r < 78 && current != sched_idle_thread()) {

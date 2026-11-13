@@ -244,8 +244,8 @@ boot, bad-input tests, a one-minute demo, and docs. **New rules:**
 | Phase | Name | Main USP / showcase | Size |
 |---|---|---|---|
 | 6 | Debug and hardening foundation ✅ done | engineering quality | M |
-| 7 | Modern hardware | serious OS | L |
-| 8 | Memory that scales | serious OS | L |
+| 7 | Modern hardware ✅ done | serious OS | L |
+| 8 | Memory that scales ✅ done | serious OS | L |
 | 9 | Multi-core | concurrency | L |
 | 10 | User mode, handles and async rings | security, performance | L |
 | 11 | Microkernel IPC and services | architecture | L |
@@ -294,6 +294,10 @@ work.
 `context_switch`.
 
 ### Phase 7: Modern hardware
+**Status: ✅ done.** See `phases/phase-7-modern-hardware.md`. Sleep
+accuracy is checked as the kernel's own share (under 1 ms); end-to-end
+latency under QEMU depends on the host and is reported, not required.
+
 1. Parse ACPI tables via Limine's RSDP: the MADT (CPU and interrupt
    controller list) and HPET.
 2. Local APIC on; legacy PIC masked; IOAPIC routing for device IRQs.
@@ -310,6 +314,12 @@ accuracy is within 1 ms; the PCI list matches QEMU's `info pci`.
 **Demo:** boot on screen, PCI device list, `idle: 0 ticks in 5 s`.
 
 ### Phase 8: Memory that scales
+**Status: ✅ done.** See `phases/phase-8-memory-that-scales.md`. Slabs
+exist for threads, processes, memory objects and regions; handle and
+message caches are created with those objects (Phases 10-11). The
+benchmark shows slabs beating the heap, but not the buddy allocator
+beating the old bitmap for single pages (see D6 note in §10).
+
 1. Buddy allocator replaces the bitmap (keep the same `pmm_` API).
 2. Slab caches for threads, processes, handles and messages.
 3. Demand paging: user memory regions are reserved, and pages are
@@ -658,7 +668,7 @@ kernel/obj/        objects, handle tables            (Ph 10)
 kernel/ring/       async rings                       (Ph 10)
 kernel/ipc/        channels, shared memory           (Ph 11)
 kernel/smp/        CPU bring-up, per-CPU, locks, RCU (Ph 9)
-kernel/acpi/, kernel/pci/                            (Ph 7)
+kernel/acpi/, kernel/pci/                            (Ph 7, created)
 kernel/trace/      tracing, diary, verifier          (Ph 6 created, 12, 20)
 kernel/checkpoint/ checkpoint and replay hooks       (Ph 17)
 user/runtime/c/, user/runtime/rust/                  (Ph 11)
@@ -721,6 +731,9 @@ operation, ring batch of 64, IPC round trip, page fault, 4 KiB file read
 | D17 | Host unit tests are freestanding programs (no C library), one tiny host layer per OS | the same clang + lld as the kernel work on Windows and Linux; no MSVC/MinGW/glibc needed | hosted tests with libc; tests only inside QEMU | a test needs real host services (files, threads) |
 | D18 | Symbol table embedded by a second link, checked not to move code | names in every panic, no debug-info parser in the kernel | DWARF in the kernel; addresses only + offline `addr2line` | line numbers are needed in traces |
 | D19 | Heap poisoning and red zones always on | memory bugs caught at the moment of reuse/free, in every build | debug-only builds | heap speed matters (revisit with the slab allocator, Phase 8) |
+| D20 | Tickless timer with lazy re-arming: reprogram the APIC alarm only when a deadline moves earlier | idle costs no interrupts; a switch costs no timer register writes | periodic tick; reprogram on every decision (doubled switch cost) | many CPUs need per-CPU alarms (Phase 9) |
+| D21 | Timing tests check the kernel's own share; end-to-end latency under QEMU is reported, not required | the host (Windows timer grid, load) adds 0-15 ms the kernel cannot control; strict end-to-end checks were flaky | strict 1 ms end to end | tests run on real hardware or KVM |
+| D22 | Keep the buddy allocator even though a next-fit bitmap is faster for single pages (16 vs 37 cycles natively) | contiguous blocks, per-page reference counts for COW, steady under fragmentation; a 64-page hot cache covers the common case | keep the bitmap | single-page allocation shows up in profiles (per-CPU caches, Phase 9) |
 
 Earlier decisions in `design/HLD.md` §6 still apply unless replaced above.
 

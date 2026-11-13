@@ -26,6 +26,8 @@ typedef enum {
     TRACE_PAGE_FAULT,       /* a = faulting address, b = instruction */
     TRACE_HEAP_GROW,        /* a = new heap end, b = pages added */
     TRACE_TEST,             /* a, b = free for self-tests */
+    TRACE_ALARM_SET,        /* a = deadline (ns), b = now (ns) */
+    TRACE_ALARM_FIRE,       /* a = deadline (ns), b = now (ns) */
     TRACE_TYPE_COUNT
 } trace_type_t;
 

@@ -1,5 +1,9 @@
 # BharatOS — Phase 5: Preemptive Scheduler
 
+> **Since Phase 7 the scheduler is tickless:** a one-shot APIC alarm
+> replaces the 100 Hz PIT tick, and time is kept in nanoseconds. The
+> "tick" below survives as a 10 ms unit. See `phase-7-modern-hardware.md`.
+
 Phase 5 makes BHARAT multitask on its own: kernel threads are switched
 automatically by the hardware timer, without calling any switch or yield
 function. It reuses the Phase 4 thread model and context switch unchanged.

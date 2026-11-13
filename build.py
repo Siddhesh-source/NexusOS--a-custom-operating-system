@@ -286,7 +286,8 @@ def run_fault_tests() -> int:
 # ---- benchmarks -----------------------------------------------------------
 
 BENCH_FILE = ROOT / "docs" / "benchmarks.md"
-BENCH_NAMES = ["context_switch", "kmalloc_kfree_64", "kmalloc_kfree_4096", "trace_event"]
+BENCH_NAMES = ["context_switch", "kmalloc_kfree_64", "kmalloc_kfree_4096", "trace_event",
+               "pmm_page", "kmalloc_kfree_176", "slab_176"]
 BENCH_HEADER = """# Benchmarks
 
 Recorded by `python build.py bench`, which boots a kernel built with
@@ -300,12 +301,14 @@ poisoning and red-zone checks.
   (scheduler decision plus register save and restore).
 - **kmalloc_kfree_64 / _4096**: one allocation and free of that size.
 - **trace_event**: recording one event in the trace ring.
+- **pmm_page**: one physical page allocated and freed (batches of 256).
+- **kmalloc_kfree_176 / slab_176**: a thread-record-sized object from the
+  general heap versus from a slab cache.
 - **boot_s**: seconds from starting QEMU to the bench results (includes
   all boot self-tests).
 
-| Date | Commit | Host | context_switch | kmalloc_kfree_64 | kmalloc_kfree_4096 | trace_event | boot_s |
-|---|---|---|---|---|---|---|---|
-"""
+""" + "| Date | Commit | Host | " + " | ".join(BENCH_NAMES) + " | boot_s |\n" \
+    + "|---" * (len(BENCH_NAMES) + 4) + "|\n"
 
 
 def run_bench() -> int:
@@ -342,7 +345,9 @@ UNIT_BUILD = BUILD_DIR / "unit"
 # Each program: the kernel files under test (the shared support files are
 # added to every program).
 UNIT_PROGRAMS = {
-    "heap": [KERNEL_DIR / "mm" / "heap.c", KERNEL_DIR / "trace" / "trace.c"],
+    "heap": [KERNEL_DIR / "mm" / "heap.c", KERNEL_DIR / "trace" / "trace.c",
+             UNIT_DIR / "fake_pmm.c"],
+    "mm": [KERNEL_DIR / "mm" / "pmm.c", KERNEL_DIR / "mm" / "slab.c"],
     "sched": [KERNEL_DIR / "sched" / "sched.c", KERNEL_DIR / "trace" / "trace.c"],
 }
 UNIT_COMMON = [UNIT_DIR / "fakes.c", KERNEL_DIR / "lib" / "kprintf.c",

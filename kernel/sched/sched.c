@@ -1,12 +1,18 @@
 #include "sched.h"
+#include "clock.h"
 #include "cpu.h"
 #include "kprintf.h"
 #include "panic.h"
 #include "trace.h"
 
 /* All scheduler state is touched only with interrupts disabled: from the
- * timer IRQ (IF=0 by the interrupt gate) or inside IRQ_GUARD sections. On a
- * single CPU that makes every operation here atomic. */
+ * alarm interrupt (IF=0 by the interrupt gate) or inside IRQ_GUARD
+ * sections. On a single CPU that makes every operation here atomic. */
+
+/* Deadlines this close count as reached: the alarm is set in whole timer
+ * counts and may fire a few microseconds early. */
+#define SCHED_SLACK_NS 50000ULL
+#define NO_DEADLINE    (~0ULL)
 
 struct sched_list {
     struct thread *head;
@@ -18,8 +24,13 @@ static struct sched_list ready_q;
 static struct sched_list sleep_q;
 static struct thread *idle;
 static bool active;
-static unsigned slice_used;        /* ticks the current thread has run */
 static struct sched_stats stats;
+static uint64_t start_ns;          /* clock time at sched_start */
+static uint64_t slice_end;         /* when the running thread's slice ends */
+static uint64_t last_account;      /* last time the running thread was charged */
+static uint64_t idle_ns;
+static uint64_t armed_at = NO_DEADLINE;   /* pending alarm, if any */
+static bool waking;                /* timer event is waking sleepers */
 
 /* ---- intrusive lists ---------------------------------------------------- */
 
@@ -51,6 +62,46 @@ static void list_remove(struct sched_list *l, struct thread *t)
     l->count--;
 }
 
+/* ---- time --------------------------------------------------------------- */
+
+/* Charge the running thread for the time since it was last charged. */
+static void account(struct thread *cur, uint64_t now)
+{
+    uint64_t d = now - last_account;
+    last_account = now;
+    cur->cpu_ns += d;
+    cur->cpu_ticks = cur->cpu_ns / SCHED_TICK_NS;
+    if (cur == idle)
+        idle_ns += d;
+}
+
+/* Set the one alarm for when `run` (about to run, or running) next needs
+ * the scheduler: its slice end if others wait for the CPU (at once if
+ * `run` is idle), or the earliest sleeper's wake-up. No work, no alarm. */
+static void arm_for(const struct thread *run, bool others_ready, uint64_t now)
+{
+    if (!active)
+        return;
+    uint64_t deadline = NO_DEADLINE;
+    if (others_ready)
+        deadline = run == idle ? now : slice_end;
+    for (struct thread *t = sleep_q.head; t != NULL; t = t->sched_next)
+        if (t->wake_ns < deadline)
+            deadline = t->wake_ns;
+
+    /* Lazy re-arming: programming the timer is a device-register write,
+     * slow next to a thread switch. Only reprogram when the new deadline
+     * is EARLIER than the pending alarm. A pending alarm that is earlier
+     * than needed (or no longer needed) just fires, and the scheduler
+     * looks again: at most one extra interrupt, instead of a register
+     * write on every switch. */
+    if (deadline >= armed_at)
+        return;
+    armed_at = deadline;
+    stats.alarms_armed++;
+    clock_set_alarm(deadline);
+}
+
 void sched_state_changed(struct thread *t, task_state_t from, task_state_t to)
 {
     /* Leaving whatever list the thread was on. */
@@ -63,6 +114,12 @@ void sched_state_changed(struct thread *t, task_state_t from, task_state_t to)
      * thread is never queued; it is the fallback when the queue is empty. */
     if (to == TASK_READY && t != idle && t->sched_list == SCHED_LIST_NONE)
         list_push_tail(&ready_q, t, SCHED_LIST_READY);
+
+    /* A new or woken thread now waits for the CPU: the running thread may
+     * have had no slice alarm (it was alone), so set one. Switches
+     * (RUNNING -> READY) are handled by schedule() itself. */
+    if (active && !waking && to == TASK_READY && from != TASK_RUNNING && t != idle)
+        arm_for(thread_current(), true, clock_now_ns());
 }
 
 /* ---- core --------------------------------------------------------------- */
@@ -74,24 +131,30 @@ void sched_state_changed(struct thread *t, task_state_t from, task_state_t to)
  *   - a BLOCKED/TERMINATED caller is on no queue and is simply left;
  *   - with an empty queue a RUNNING caller keeps the CPU, anything else
  *     falls back to the idle thread. */
-static void schedule(const char *why, bool preempt)
+static void schedule(bool preempt)
 {
+    uint64_t now = clock_now_ns();
     struct thread *cur = thread_current();
     struct thread *next = ready_q.head;
+    account(cur, now);
+
     if (next == NULL) {
-        if (cur->state == TASK_RUNNING)
-            return;                 /* nobody else wants the CPU */
+        if (cur->state == TASK_RUNNING) {     /* nobody else wants the CPU */
+            arm_for(cur, false, now);
+            return;
+        }
         next = idle;
     }
-    if (next == cur)
+    if (next == cur) {
+        arm_for(cur, ready_q.count > 1, now);
         return;
+    }
     if (next->state != TASK_READY) {
         kprintf("[SCHED] FATAL: selected TID %u in state %s\n",
                 next->tid, task_state_str(next->state));
         panic("scheduler selected a non-READY thread");
     }
 
-    slice_used = 0;
     stats.switches++;
     if (preempt) {
         stats.preemptions++;
@@ -101,50 +164,57 @@ static void schedule(const char *why, bool preempt)
     }
     if (next == idle)
         stats.idle_switches++;
-    (void)why;
-    trace_event(preempt ? TRACE_SCHED_PREEMPT : TRACE_SCHED_SWITCH,
-                cur->tid, next->tid);
+    trace_event(preempt ? TRACE_SCHED_PREEMPT : TRACE_SCHED_SWITCH, cur->tid, next->tid);
 
-    /* Phase 4 primitive: validates both contexts, updates states (which
-     * requeues `cur` if it was RUNNING), switches CR3 if needed, then
-     * context_switch. Returns here when `cur` is scheduled again. */
+    /* After the switch, others wait if more than `next` is queued, or if
+     * `cur` goes back to the queue. */
+    bool others = (next == idle ? ready_q.count : ready_q.count - 1) > 0
+                  || (cur->state == TASK_RUNNING && cur != idle);
+    slice_end = now + SCHED_QUANTUM_NS;
+    arm_for(next, others, now);
+
+    /* Validates both contexts, updates states (which requeues `cur` if it
+     * was RUNNING), switches CR3 if needed, then context_switch. Returns
+     * here when `cur` is scheduled again. */
     if (thread_switch(next) != PROC_OK)
         panic("scheduler: thread_switch refused a READY thread");
 }
 
-static void wake_sleepers(void)
+static void wake_sleepers(uint64_t now)
 {
     struct thread *t = sleep_q.head;
     while (t != NULL) {
         struct thread *n = t->sched_next;
-        if (stats.ticks >= t->wake_tick)
+        if (t->wake_ns <= now + SCHED_SLACK_NS)
             thread_set_state(t, TASK_READY);   /* hook moves it to ready_q */
         t = n;
     }
 }
 
-void sched_tick(void)
+void sched_timer_event(void)
 {
     if (!active)
         return;
-    stats.ticks++;
-    stats.invocations++;           /* every tick is a scheduling opportunity */
-
     struct thread *cur = thread_current();
-    cur->cpu_ticks++;
+    stats.timer_events++;
+    stats.invocations++;
     if (cur == idle)
-        stats.idle_ticks++;
+        stats.idle_timer_events++;
+    armed_at = NO_DEADLINE;                /* the one-shot alarm has fired */
 
-    wake_sleepers();
+    uint64_t now = clock_now_ns();
+    /* The decision below sets the alarm; waking must not set its own
+     * (it would fire again for nothing right after the switch). */
+    waking = true;
+    wake_sleepers(now);
+    waking = false;
 
-    /* Idle yields the moment real work exists; others after a quantum. */
-    if (cur == idle) {
-        if (ready_q.head != NULL)
-            schedule("work available", true);
-        return;
-    }
-    if (++slice_used >= SCHED_QUANTUM_TICKS && ready_q.head != NULL)
-        schedule("quantum expired", true);
+    /* Idle gives way the moment real work exists; others when their slice
+     * is over. */
+    if (ready_q.head != NULL && (cur == idle || now + SCHED_SLACK_NS >= slice_end))
+        schedule(true);
+    else
+        arm_for(cur, ready_q.head != NULL, now);
 }
 
 void sched_yield(void)
@@ -152,35 +222,41 @@ void sched_yield(void)
     IRQ_GUARD();
     if (active) {
         stats.invocations++;
-        schedule("yield", false);
+        schedule(false);
     }
 }
 
-void sched_sleep(uint64_t ticks)
+void sched_sleep_ns(uint64_t ns)
 {
     IRQ_GUARD();
     if (!active)
         panic("sched_sleep before the scheduler started");
     struct thread *cur = thread_current();
-    cur->wake_tick = stats.ticks + (ticks ? ticks : 1);
+    cur->wake_ns = clock_now_ns() + (ns ? ns : 1);
     thread_set_state(cur, TASK_BLOCKED);
     list_push_tail(&sleep_q, cur, SCHED_LIST_SLEEP);
     stats.invocations++;
-    schedule("sleep", false);
+    schedule(false);
+}
+
+void sched_sleep(uint64_t ticks)
+{
+    sched_sleep_ns((ticks ? ticks : 1) * SCHED_TICK_NS);
 }
 
 void sched_reschedule(void)
 {
     IRQ_GUARD();
     stats.invocations++;
-    schedule(thread_current()->state == TASK_TERMINATED ? "exit" : "block", false);
+    schedule(false);
 }
 
 /* ---- idle --------------------------------------------------------------- */
 
 /* Runs only when no other thread is READY. Reclaims exited threads (their
  * stacks are certainly no longer in use once we are running here), then
- * halts until the next interrupt. */
+ * halts until the next interrupt. With no alarm set, that may be a long
+ * time: tickless idle. */
 static int64_t idle_entry(void *arg)
 {
     (void)arg;
@@ -204,17 +280,20 @@ void sched_init(void)
     if (idle->sched_list == SCHED_LIST_READY)
         list_remove(&ready_q, idle);
 
-    kprintf("[sched] Round-robin scheduler: %d Hz timer, quantum %d ticks (%d ms), "
+    kprintf("[sched] Round-robin scheduler, tickless: slice %d ms, "
             "idle TID %u; boot thread TID %u registered as current\n",
-            SCHED_TIMER_HZ, SCHED_QUANTUM_TICKS, SCHED_QUANTUM_TICKS * 1000 / SCHED_TIMER_HZ,
-            idle->tid, thread_current()->tid);
+            (int)(SCHED_QUANTUM_NS / 1000000), idle->tid, thread_current()->tid);
 }
 
 void sched_start(void)
 {
     IRQ_GUARD();
-    slice_used = 0;
+    if (!clock_ready())
+        panic("sched_start: the clock is not running");
+    start_ns = last_account = clock_now_ns();
+    slice_end = start_ns + SCHED_QUANTUM_NS;
     active = true;
+    arm_for(thread_current(), ready_q.head != NULL, start_ns);
     kprintf("[sched] Preemption enabled (%u threads READY).\n", ready_q.count);
 }
 
@@ -232,13 +311,15 @@ struct thread *sched_idle_thread(void)
 
 uint64_t sched_ticks(void)
 {
-    return stats.ticks;
+    return active ? (clock_now_ns() - start_ns) / SCHED_TICK_NS : 0;
 }
 
 void sched_get_stats(struct sched_stats *out)
 {
     IRQ_GUARD();
     *out = stats;
+    out->ticks = sched_ticks();
+    out->idle_ticks = idle_ns / SCHED_TICK_NS;
     out->runnable = ready_q.count;
     out->sleeping = sleep_q.count;
     out->current = thread_current()->tid;
@@ -249,8 +330,10 @@ void sched_print_stats(void)
     struct sched_stats s;
     sched_get_stats(&s);
     kprintf("BHARAT SCHEDULER\n");
-    kprintf("  Policy            : ROUND-ROBIN, quantum %d ticks\n", SCHED_QUANTUM_TICKS);
-    kprintf("  Timer ticks       : %lu\n", s.ticks);
+    kprintf("  Policy            : ROUND-ROBIN, quantum %d ticks, tickless\n", SCHED_QUANTUM_TICKS);
+    kprintf("  Elapsed ticks     : %lu\n", s.ticks);
+    kprintf("  Timer events      : %lu (%lu while idle), %lu alarms set\n",
+            s.timer_events, s.idle_timer_events, s.alarms_armed);
     kprintf("  Scheduler calls   : %lu\n", s.invocations);
     kprintf("  Context switches  : %lu (%lu preemptive, %lu voluntary)\n",
             s.switches, s.preemptions, s.voluntary);
