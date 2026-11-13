@@ -79,5 +79,5 @@ void page_fault_handler(struct interrupt_frame *frame)
 
     /* No demand paging, swap or copy-on-write yet: any other fault is a
      * kernel bug. */
-    exception_fatal(frame, "Unhandled page fault - kernel halted");
+    exception_unhandled(frame, "Unhandled page fault - kernel halted");
 }

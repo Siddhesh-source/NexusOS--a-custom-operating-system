@@ -227,11 +227,17 @@ def find_ovmf() -> tuple[Path | None, Path | None]:
     return code_p, vars_p
 
 
-def run_qemu(image: Path, *, uefi: bool = False) -> int:
+def run_qemu(image: Path, *, uefi: bool = False, window: bool = False) -> int:
     cmd = [TOOLS["qemu"], "-m", "512M", "-smp", str(SMP),
            "-drive", f"file={image},format=raw,media=disk,if=ide",
            "-no-reboot", "-no-shutdown"]
-    if not uefi:
+    if window and not uefi:
+        # A window with the screen (keys typed there arrive as a PS/2
+        # keyboard), and the serial console still in this terminal.
+        cmd += ["-serial", "mon:stdio"]
+        print("[qemu] Type in the QEMU window or here. Quit: close the window, "
+              "or Ctrl+A then X here.")
+    elif not uefi:
         cmd += ["-nographic"]
     else:
         code, vars_t = find_ovmf()
@@ -435,6 +441,8 @@ def main() -> int:
     ap.add_argument("--fault-demo", choices=FAULT_DEMOS,
                     help="build a kernel that deliberately triggers this fatal "
                          "exception after the memory tests")
+    ap.add_argument("--window", action="store_true",
+                    help="run: also open a QEMU window showing the screen")
     ap.add_argument("--smp", type=int, default=DEFAULT_SMP, metavar="N",
                     help=f"number of CPUs for QEMU (1-16, default {DEFAULT_SMP})")
     args = ap.parse_args()
@@ -464,7 +472,7 @@ def main() -> int:
             kernel = build_kernel(fault_demo=args.fault_demo)
             image = build_image(kernel)
         if args.command == "run":
-            return run_qemu(image, uefi=False)
+            return run_qemu(image, uefi=False, window=args.window)
         if args.command == "run-uefi":
             return run_qemu(image, uefi=True)
         if args.command == "debug":

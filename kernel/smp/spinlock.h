@@ -48,6 +48,11 @@ enum lock_class {
     LOCK_CLASS_TEST,        /* self-tests */
     LOCK_CLASS_TEST_A,      /* self-tests of the order checker */
     LOCK_CLASS_TEST_B,
+    LOCK_CLASS_WAITQ,       /* wait queues (before run queues) */
+    LOCK_CLASS_INPUT,       /* keyboard/mouse event queue */
+    LOCK_CLASS_FS,          /* the in-memory file system */
+    LOCK_CLASS_DEMO_A,      /* the shell's lock-order demo */
+    LOCK_CLASS_DEMO_B,
     LOCK_CLASS_COUNT
 };
 

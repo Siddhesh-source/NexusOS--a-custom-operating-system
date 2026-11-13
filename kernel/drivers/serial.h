@@ -2,6 +2,7 @@
 #define BHARAT_SERIAL_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -26,5 +27,10 @@ void console_unlock(uint64_t flags);
 /* Send a copy of every byte written to the serial port to `fn` as well
  * (used by the screen console). NULL turns it off. */
 void serial_set_mirror(void (*fn)(char c));
+
+/* Receiving: turn on the "byte received" interrupt (the caller routes
+ * IRQ 4), and take one received byte if there is one. */
+void serial_enable_rx_irq(void);
+bool serial_try_read(uint8_t *out);
 
 #endif

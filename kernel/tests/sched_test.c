@@ -1,4 +1,5 @@
 #include "sched_test.h"
+#include "selftest.h"
 #include "sched.h"
 #include "proc.h"
 #include "heap.h"
@@ -819,5 +820,6 @@ bool sched_run_tests(void)
     kprintf("\n");
     sched_print_stats();
     final_panel();
+    selftest_record("Scheduler", passed, failed);
     return failed == 0;
 }

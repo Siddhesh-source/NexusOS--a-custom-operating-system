@@ -37,6 +37,11 @@ void interrupt_dump_frame(const struct interrupt_frame *frame);
 void exception_fatal(const struct interrupt_frame *frame, const char *reason)
     __attribute__((noreturn));
 
+/* An exception nobody handled: ends only the current thread if it asked
+ * for that (crash.h), otherwise exception_fatal. Returns only in the
+ * first case. */
+void exception_unhandled(struct interrupt_frame *frame, const char *reason);
+
 const char *exception_name(uint64_t vector);
 
 #endif /* BHARAT_INTERRUPTS_H */

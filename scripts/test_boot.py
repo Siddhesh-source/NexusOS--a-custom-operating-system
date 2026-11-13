@@ -1,4 +1,5 @@
 from __future__ import annotations
+import codecs
 import os
 import queue
 import shutil
@@ -22,6 +23,9 @@ REQUIRED = [
     "[ok] Phase 7 modern hardware verified.",
     "[ok] Phase 8 memory that scales verified.",
     "[ok] Phase 9 multi-core verified.",
+    "[ok] Phase 10 input verified.",
+    "[ok] Phase 10 files in memory verified.",
+    "[ok] Phase 10 login and shell verified.",
 ]
 
 # CPUs QEMU gives the kernel (build.py --smp sets this).
@@ -102,68 +106,123 @@ def cmd_for(image: Path) -> List[str]:
             "-nographic", "-no-reboot", "-no-shutdown"]
 
 
+# After the boot checks pass, a short session typed at the real login
+# prompt: (text to wait for, keys to send). Each wait looks only at output
+# that came after the previous step, so a prompt seen earlier does not
+# count again. Serial input proves typed keys reach the shell through
+# IRQ 4; "\x01c" switches QEMU's console to its monitor, where `sendkey`
+# presses keys on the emulated PS/2 keyboard (IRQ 1), then back.
+PROMPT = "tester@bharat:~$ "
+SESSION = [
+    ("BharatOS login: ", "tester\n"),
+    (PROMPT, "echo typed at the prompt > t.txt\n"),
+    (PROMPT, "cat t.txt\n"),
+    ("typed at the prompt", None),
+    # The monitor echoes its own commands around the typed letters, so
+    # check for a phrase only the command's output contains.
+    (PROMPT, "\x01c" + "".join(f"sendkey {k}\n" for k in "about") + "sendkey ret\n" + "\x01c"),
+    ("Self-checks:", None),
+    (PROMPT, "checks\n"),
+    ("All good", None),
+    (PROMPT, None),
+]
+
+
 def boot_and_watch(image: Path, required: List[str], forbidden: List[str],
-                   timeout: int) -> tuple[bool, str, float]:
-    """Boot `image` until every `required` marker is seen (success), a
-    `forbidden` marker appears, or `timeout` seconds pass. Also returns the
-    seconds from starting QEMU to the end of the watch."""
+                   timeout: int, session: List[tuple] | None = None) -> tuple[bool, str, float]:
+    """Boot `image` until every `required` marker is seen, a `forbidden`
+    marker appears, or `timeout` seconds pass. Then, if a `session` is
+    given, type it (see SESSION); success needs every step. Also returns
+    the seconds from starting QEMU until the required markers were seen."""
     cmd = cmd_for(image)
     if not cmd:
         return False, "", 0.0
     print(f"[TEST] {' '.join(cmd)}")
-    # The kernel emits UTF-8 (box-drawing glyphs); don't let the platform
-    # default codec (cp1252 on Windows) decode or re-encode it.
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                         text=True, bufsize=1, encoding="utf-8", errors="replace")
+                         stdin=subprocess.PIPE)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
-    # Read on a background thread so the deadlines below are always honoured,
-    # even if the kernel hangs silently or only prints newline-less timer dots.
+    # Read raw chunks on a background thread so the deadlines below are
+    # always honoured, and so prompts without a newline are seen. The
+    # kernel emits UTF-8 (box-drawing glyphs); decode it as such, not with
+    # the platform default codec (cp1252 on Windows).
     q: "queue.Queue[str | None]" = queue.Queue()
 
     def reader() -> None:
         assert p.stdout is not None
-        for raw in p.stdout:
-            q.put(raw.rstrip())
+        dec = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        fd = p.stdout.fileno()
+        while True:
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                break
+            q.put(dec.decode(chunk))
         q.put(None)
 
     threading.Thread(target=reader, daemon=True).start()
 
-    lines: List[str] = []
+    text = ""            # everything so far (with \r), for markers
+    partial = ""         # last line, not yet printed
     started = time.time()
+    boot_seconds = 0.0
     deadline = started + timeout
+    booted = False
     success = False
     failed = False
+    steps = list(session or [])
+    step_from = 0        # session waits look at text[step_from:]
     try:
         while time.time() < deadline:
             try:
-                line = q.get(timeout=0.5)
+                chunk = q.get(timeout=0.5)
             except queue.Empty:
                 continue
-            if line is None:
+            if chunk is None:
                 break
-            lines.append(line)
-            print(f"  | {line}")
-            if not failed and any(m in line for m in forbidden):
+            check_from = max(0, len(text) - 64)
+            text += chunk
+            partial += chunk
+            *done, partial = partial.split("\n")
+            for line in done:
+                print(f"  | {line.rstrip()}")
+            if not failed and any(m in text[check_from:] for m in forbidden):
                 # Keep collecting briefly so the full report is captured.
                 failed = True
                 deadline = min(deadline, time.time() + 2)
                 continue
-            if not failed and all(m in "\n".join(lines) for m in required):
-                success = True
-                break
+            if failed:
+                continue
+            if not booted and all(m in text for m in required):
+                booted = True
+                boot_seconds = time.time() - started
+                step_from = len(text) - len(chunk)
+            if booted:
+                while steps and steps[0][0] in text[step_from:]:
+                    wait_for, send = steps.pop(0)
+                    step_from = text.index(wait_for, step_from) + len(wait_for)
+                    if send is not None:
+                        assert p.stdin is not None
+                        p.stdin.write(send.encode())
+                        p.stdin.flush()
+                if not steps:
+                    success = True
+                    break
     finally:
+        if partial:
+            print(f"  | {partial.rstrip()}")
         if p.poll() is None:
             p.terminate()
             try:
                 p.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 p.kill()
-    return success, "\n".join(lines), time.time() - started
+    if session and booted and not success:
+        print(f"[FAIL] typed session stopped waiting for {steps[0][0]!r}")
+    return success, text.replace("\r", ""), boot_seconds or time.time() - started
 
 
 def run_boot_test(image: Path, timeout: int = 120) -> int:
-    success, full, seconds = boot_and_watch(image, REQUIRED, FORBIDDEN, timeout)
+    success, full, seconds = boot_and_watch(image, REQUIRED, FORBIDDEN, timeout, SESSION)
     print("=" * 60)
     if success:
         from budgets import check_budgets
@@ -177,6 +236,8 @@ def run_boot_test(image: Path, timeout: int = 120) -> int:
         print("[PASS] Phase 7 modern hardware tests passed.")
         print("[PASS] Phase 8 memory-that-scales tests passed.")
         print(f"[PASS] Phase 9 multi-core tests passed ({QEMU_SMP} CPUs).")
+        print("[PASS] Phase 10 input, files, login and shell tests passed.")
+        print("[PASS] Keys typed at the login prompt (serial and PS/2 keyboard) reached the shell.")
         return 0
     print("[FAIL] Boot did not complete cleanly.")
     for m in FORBIDDEN:

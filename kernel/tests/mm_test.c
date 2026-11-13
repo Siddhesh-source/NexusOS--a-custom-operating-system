@@ -1,4 +1,5 @@
 #include "mm_test.h"
+#include "selftest.h"
 #include "mm.h"
 #include "pmm.h"
 #include "vmm.h"
@@ -482,5 +483,6 @@ bool mm_run_tests(void)
     kprintf("\n[test] ===== %u passed, %u failed =====\n", passed, failed);
     pmm_print_stats();
     heap_print_stats();
+    selftest_record("Memory management", passed, failed);
     return failed == 0;
 }

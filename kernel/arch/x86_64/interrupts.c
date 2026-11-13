@@ -8,6 +8,7 @@
 #include "trace.h"
 #include "apic.h"
 #include "panic.h"
+#include "crash.h"
 
 static const char *const exception_names[32] = {
     "Divide-by-zero (#DE)",           "Debug (#DB)",
@@ -63,6 +64,13 @@ void exception_fatal(const struct interrupt_frame *f, const char *reason)
     halt_forever();
 }
 
+void exception_unhandled(struct interrupt_frame *f, const char *reason)
+{
+    if (crash_contain(f, reason))
+        return;                 /* only the faulting thread ends */
+    exception_fatal(f, reason);
+}
+
 static interrupt_handler_t handlers[256];
 static uint64_t spurious;
 
@@ -105,11 +113,15 @@ void interrupt_dispatch(struct interrupt_frame *frame)
                     (void *)frame->rip, frame->error_code);
             break;
         }
-        exception_fatal(frame, NULL);
+        exception_unhandled(frame, NULL);
+        break;
     case 32: /* IRQ0 - Timer */
         timer_irq();
         break;
     default:
-        exception_fatal(frame, frame->vector < 32 ? NULL : "Unexpected interrupt vector");
+        if (frame->vector < 32)
+            exception_unhandled(frame, NULL);
+        else
+            exception_fatal(frame, "Unexpected interrupt vector");
     }
 }

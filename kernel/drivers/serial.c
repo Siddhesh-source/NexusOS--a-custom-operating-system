@@ -22,6 +22,8 @@ static inline uint8_t inb(uint16_t port)
 #define REG_MCR 4
 #define REG_LSR 5
 #define LSR_THRE 0x20
+#define LSR_DATA 0x01
+#define IER_RX   0x01
 
 void serial_init(void)
 {
@@ -131,4 +133,21 @@ void serial_put_hex(uint64_t value)
     for (int i = 60; i >= 0; i -= 4)
         serial_putchar(d[(value >> i) & 0xF]);
     console_unlock(flags);
+}
+
+void serial_enable_rx_irq(void)
+{
+    uint16_t port = SERIAL_COM1;
+    while (inb(port + REG_LSR) & LSR_DATA)    /* drop anything typed during boot */
+        (void)inb(port + REG_THR);
+    outb(port + REG_IER, IER_RX);
+}
+
+bool serial_try_read(uint8_t *out)
+{
+    uint16_t port = SERIAL_COM1;
+    if (!(inb(port + REG_LSR) & LSR_DATA))
+        return false;
+    *out = inb(port + REG_THR);              /* the receive register shares offset 0 */
+    return true;
 }
