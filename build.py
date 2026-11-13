@@ -28,10 +28,12 @@ KERNEL_DIR = ROOT / "kernel"
 BOOT_DIR = ROOT / "boot"
 BUILD_DIR = ROOT / "build"
 TOOLS_DIR = ROOT / "tools"
+SCRIPTS_DIR = ROOT / "scripts"
+sys.path.insert(0, str(SCRIPTS_DIR))   # fat32.py, test_boot.py
 LIMINE_DIR = TOOLS_DIR / "limine" / "limine-binary"
 
-KERNEL_ELF = BUILD_DIR / "nexus.elf"
-KERNEL_IMG = BUILD_DIR / "nexus.img"
+KERNEL_ELF = BUILD_DIR / "bharat.elf"
+KERNEL_IMG = BUILD_DIR / "bharat.img"
 
 IS_WIN = os.name == "nt"
 
@@ -86,13 +88,21 @@ TOOLS: dict[str, str] = {}
 
 
 def configure() -> None:
-    TOOLS["clang"] = resolve_tool("NEXUS_CLANG", ["clang", "clang-18", "clang-17"])
-    TOOLS["ld"] = resolve_tool("NEXUS_LLD", ["ld.lld", "lld", "ld.lld-18"])
-    TOOLS["objcopy"] = resolve_tool("NEXUS_OBJCOPY", ["llvm-objcopy", "objcopy"])
-    TOOLS["nasm"] = resolve_tool("NEXUS_NASM", ["nasm"])
-    TOOLS["qemu"] = resolve_tool("NEXUS_QEMU", ["qemu-system-x86_64"])
+    TOOLS["clang"] = resolve_tool("BHARAT_CLANG", ["clang", "clang-18", "clang-17"])
+    TOOLS["ld"] = resolve_tool("BHARAT_LLD", ["ld.lld", "lld", "ld.lld-18"])
+    TOOLS["objcopy"] = resolve_tool("BHARAT_OBJCOPY", ["llvm-objcopy", "objcopy"])
+    TOOLS["nasm"] = resolve_tool("BHARAT_NASM", ["nasm"])
+    TOOLS["qemu"] = resolve_tool("BHARAT_QEMU", ["qemu-system-x86_64"])
     TOOLS["limine"] = str(find_limine())
 
+
+ARCH_DIR = KERNEL_DIR / "arch" / "x86_64"
+ENTRY_ASM = ARCH_DIR / "entry.asm"      # linked first
+LINKER_SCRIPT = ARCH_DIR / "linker.ld"
+
+# Every kernel folder that holds headers is on the include path, so code
+# keeps writing #include "pmm.h" no matter which folder pmm.h lives in.
+INCLUDE_DIRS = sorted({h.parent for h in KERNEL_DIR.rglob("*.h")})
 
 CFLAGS = [
     "-target", "x86_64-unknown-none-elf",
@@ -100,30 +110,28 @@ CFLAGS = [
     "-mno-red-zone", "-mno-mmx", "-mno-sse", "-mno-sse2",
     "-mcmodel=kernel", "-m64", "-march=x86-64",
     "-Wall", "-Wextra", "-O2", "-g", "-std=gnu11",
-    f"-I{KERNEL_DIR}",
+    *[f"-I{d}" for d in INCLUDE_DIRS],
 ]
 
 LDFLAGS = [
     "-nostdlib", "-static",
     "-z", "max-page-size=0x1000", "-z", "noexecstack", "-z", "nocopyreloc",
     "-m", "elf_x86_64",
-    "-T", str(KERNEL_DIR / "linker.ld"),
+    "-T", str(LINKER_SCRIPT),
     "--image-base=0xffffffff80200000",
 ]
 
-C_SOURCES = [
-    "kernel.c", "serial.c", "panic.c", "kprintf.c", "string.c", "box.c",
-    # Phase 2: descriptor tables, exceptions, timer
-    "gdt.c", "idt.c", "interrupts.c", "timer.c", "test_exception.c",
-    # Phase 3: memory management
-    "mm.c", "pmm.c", "vmm.c", "heap.c", "pagefault.c", "mm_test.c",
-    # Phase 4: processes, threads, context switching
-    "kstack.c", "proc.c", "proc_test.c",
-    # Phase 5: preemptive scheduler
-    "sched.c", "sched_test.c",
-]
-ASM_SOURCES = ["interrupt_asm.asm", "probe.asm", "context.asm", "context_test.asm",
-               "sched_spin.asm"]
+# Sources are found automatically: drop a .c or .asm file into any folder
+# under kernel/ and it is built. Sorted so builds are repeatable.
+C_SOURCES = sorted(KERNEL_DIR.rglob("*.c"))
+ASM_SOURCES = sorted(a for a in KERNEL_DIR.rglob("*.asm") if a != ENTRY_ASM)
+
+
+def object_for(src: Path) -> Path:
+    """build/<folder path with _>_<name>.o, so equal names never collide."""
+    rel = src.relative_to(KERNEL_DIR).with_suffix("")
+    return BUILD_DIR / ("_".join(rel.parts) + ".o")
+
 
 # Opt-in fatal exception demos (see run_fault_demo() in kernel.c).
 FAULT_DEMOS = ["pf", "null", "stack", "de", "ud", "df", "ctx", "tstack"]
@@ -131,19 +139,18 @@ FAULT_DEMOS = ["pf", "null", "stack", "de", "ud", "df", "ctx", "tstack"]
 
 def build_kernel(fault_demo: str | None = None) -> Path:
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    entry_o = BUILD_DIR / "entry.o"
-    run([TOOLS["nasm"], "-f", "elf64", "-F", "dwarf", "-g",
-         str(KERNEL_DIR / "entry.asm"), "-o", str(entry_o)])
+    nasm = [TOOLS["nasm"], "-f", "elf64", "-F", "dwarf", "-g"]
+    entry_o = object_for(ENTRY_ASM)
+    run([*nasm, str(ENTRY_ASM), "-o", str(entry_o)])
     objs = [entry_o]
-    defines = [f"-DNEXUS_FAULT_DEMO_{fault_demo.upper()}"] if fault_demo else []
+    defines = [f"-DBHARAT_FAULT_DEMO_{fault_demo.upper()}"] if fault_demo else []
     for src in C_SOURCES:
-        obj = BUILD_DIR / (Path(src).stem + ".o")
-        run([TOOLS["clang"], *CFLAGS, *defines, "-c", str(KERNEL_DIR / src), "-o", str(obj)])
+        obj = object_for(src)
+        run([TOOLS["clang"], *CFLAGS, *defines, "-c", str(src), "-o", str(obj)])
         objs.append(obj)
     for src in ASM_SOURCES:
-        obj = BUILD_DIR / (Path(src).stem + ".o")
-        run([TOOLS["nasm"], "-f", "elf64", "-F", "dwarf", "-g",
-             str(KERNEL_DIR / src), "-o", str(obj)])
+        obj = object_for(src)
+        run([*nasm, str(src), "-o", str(obj)])
         objs.append(obj)
     run([TOOLS["ld"], *LDFLAGS, *[str(o) for o in objs], "-o", str(KERNEL_ELF)])
     ok(f"Built {KERNEL_ELF}")
@@ -151,8 +158,8 @@ def build_kernel(fault_demo: str | None = None) -> Path:
 
 
 def build_image(kernel_elf: Path) -> Path:
-    from fat32 import build_nexus_image
-    build_nexus_image(
+    from fat32 import build_bharat_image
+    build_bharat_image(
         image_path=KERNEL_IMG,
         kernel_elf=kernel_elf,
         limine_dir=LIMINE_DIR,
@@ -165,8 +172,8 @@ def build_image(kernel_elf: Path) -> Path:
 
 
 def find_ovmf() -> tuple[Path | None, Path | None]:
-    code = os.environ.get("NEXUS_OVMF_CODE")
-    vars_t = os.environ.get("NEXUS_OVMF_VARS")
+    code = os.environ.get("BHARAT_OVMF_CODE")
+    vars_t = os.environ.get("BHARAT_OVMF_VARS")
     code_p = Path(code) if code and Path(code).exists() else None
     vars_p = Path(vars_t) if vars_t and Path(vars_t).exists() else None
     if not IS_WIN:
@@ -235,7 +242,7 @@ def clean() -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="build.py",
-                                 description="NEXUS OS build system")
+                                 description="BharatOS build system")
     ap.add_argument("command",
                     choices=["build", "image", "run", "run-uefi", "test",
                              "test-faults", "clean", "help"],

@@ -18,7 +18,7 @@ BIN_URL = f"{BASE}/{VERSION}/limine-binary.tar.xz"
 
 def fetch(url: str) -> bytes:
     print(f"[fetch] {url}")
-    req = urllib.request.Request(url, headers={"User-Agent": "nexus-build/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "bharat-build/1.0"})
     with urllib.request.urlopen(req, timeout=300) as r:
         return r.read()
 
