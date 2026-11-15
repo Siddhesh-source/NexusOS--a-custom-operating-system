@@ -4,6 +4,11 @@
 login with your name, then a desktop with windows for the terminal, your
 files, a live view of every CPU, and the system's health.
 
+**Look:** redesigned after a design review (smooth IBM Plex fonts,
+rounded windows, a dock, "Midnight and ivory" colours); see
+`docs/design/improvements.md`. The colours and fonts named below are the
+original Phase 11 ones.
+
 **Status:** done. 50 new boot checks (`desktop_test.c`) pass on `--smp 1`,
 `2` and `4` with every earlier suite (566 in all). After the checks, the
 boot test types a name into the graphical login on the emulated PS/2

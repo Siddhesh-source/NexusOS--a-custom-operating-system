@@ -385,7 +385,8 @@ heading). Nothing was deleted.
   (`fs_*`, `ui_*`, `input_*`) so the move is mechanical.
 - **Files live in RAM** (ramfs), seeded at boot from a small read-only
   bundle (a Limine module). Saving to disk comes with BharatFS (Phase 17).
-- **One font, one theme**, from `docs/design/UI.md`; no animations beyond
+- **One font family (sans + mono), one theme**, from `docs/design/UI.md`
+  (D38); no animations beyond
   a moving cursor and redraws.
 - Every V1 feature still gets boot self-tests (headless) and a line in its
   phase doc; thorough testing is Phase 12's job.
@@ -893,6 +894,7 @@ operation, ring batch of 64, IPC round trip, page fault, 4 KiB file read
 | D35 | Once the desktop runs, input goes by source: PS/2 keyboard and mouse to the desktop's queue, serial keys to the text console's | both sessions work at once (a terminal and the QEMU window), and tests can type into each one separately; one reader per queue keeps the queue simple | one queue with the desktop forwarding keys to the console; desktop takes all input | more than two readers (windows in user mode, Phase 13+) |
 | D36 | Desktop draws everything into a back buffer and copies one damage rectangle (the union of all changes) to the screen, redrawing every layer clipped to it | simplest design that never shows half-drawn windows; a pointer move costs two tiny redraws | a buffer per window (memory, compositing code); a list of damage rectangles | far-apart changes every frame show up in profiles |
 | D37 | V1 apps run on the desktop thread, one event at a time; the tour drives them through the same key path | no locking inside the window manager or apps; the tour tests the real paths | a thread per window (locks everywhere) | apps move to user mode (Phase 13) |
+| D38 | Desktop redesign ("Midnight and ivory"): smooth fonts rendered ahead of time from IBM Plex (OFL) into a checked-in file linked as data; rounded windows, soft shadows, a dock; all blending in integer maths | the 8x8 BIOS font made V1 look 90s; pre-rendered coverage gives smooth text with no font engine in the kernel and no new build dependency (Pillow only to regenerate) | a TrueType rasteriser in the kernel; keeping bitmap fonts | sizes or scripts beyond ASCII are needed (Devanagari, Phase 22) |
 | D27 | Boot tests run QEMU's CPUs on one host thread (`thread=single`) | results do not depend on how busy the host is; parallel runs remain a manual stress and the bench mode | `thread=multi` in every test (flaky timing checks) | CI gets KVM |
 | D22 | Keep the buddy allocator even though a next-fit bitmap is faster for single pages (16 vs 37 cycles natively) | contiguous blocks, per-page reference counts for COW, steady under fragmentation; a 64-page hot cache covers the common case | keep the bitmap | single-page allocation shows up in profiles (per-CPU caches; not needed in Phase 9: the page allocator is not on the switch path, revisit with user processes) |
 

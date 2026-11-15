@@ -20,54 +20,79 @@ here first.
 
 ## Layout
 
+The look is "Midnight and ivory" (chosen in the Phase 11 design review,
+`docs/design/improvements.md`): calm dark slate behind everything, warm
+ivory windows on top, one burnt-saffron button where it matters.
+
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│  ◉ BharatOS    Terminal   Files   System   ...      ✓ Healthy  14:32 │  top bar (32 px)
-├──────────────────────────────────────────────────────────────────────┤
+│ ● BharatOS   Terminal         ● 569 checks passed  asha  4 CPUs 14:32 Log out │ top bar (30 px)
 │                                                                      │
-│   ┌──────────────────────────────┐                                   │
-│   │ Files                    – ✕ │  window title bar (28 px)         │
-│   ├──────────────────────────────┤                                   │
-│   │ 📁 notes          History ⟲  │                                   │
-│   │ 📄 todo.txt       History ⟲  │                                   │
-│   │                              │                                   │
-│   └──────────────────────────────┘                                   │
+│          ╭──────────────── Files ──────────────── ● ╮                │ title (40 px)
+│          │ [Up] [Open] [New file] [New folder] [Delete]│             │ toolbar (56 px)
+│          │ /home/asha                                  │             │
+│          │ ▰ notes                          3 items    │             │ rows (32 px)
+│          │ ▯ todo.txt                       120 bytes  │             │
+│          ╰─────────────────────────────────────────────╯  (shadow)   │
 │                                                                      │
+│              ╭── >_  ▰  ▮▮▮  ✚  i ──╮                                │ dock
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Grid:** everything aligns to 8 px. Padding inside panels 16 px.
-- **Top bar:** app switcher on the left, health badge and clock on the
-  right. Clicking the badge opens System → Health.
-- **Windows:** plain rectangles, 1 px border, title bar with close and
-  minimise. No overlapping shadows (keeps drawing cheap).
+- **Grid:** everything aligns to 8 px. Insets 16 px.
+- **Top bar (status only):** brand and the focused app's name on the
+  left; health (green dot and check count, click for Health), user, CPU
+  count, clock and Log out on the right. See-through dark over the
+  wallpaper.
+- **Dock (apps):** bottom centre, a rounded dark pill with one tile per
+  app and its name; a saffron dot under each running app; the focused
+  app's tile is lightly highlighted.
+- **Windows:** rounded (12 px) ivory, soft offset shadow (deeper on the
+  focused window), title centred in the window's own surface with a
+  hairline below, a round close button (red on the focused window). New
+  windows open centred. The terminal is the one dark window.
+- **Buttons:** rounded (8 px), medium weight. One primary per window in
+  `primary`; the rest quiet `surface-2`.
 - **Dialogs** (permission prompts, errors): centred, dimmed background,
   max 3 buttons, the safe choice ("Deny") is never the default for
   permissions.
+- **Login:** a lock screen on the wallpaper: the time, the brand, a round
+  avatar with the first letter of the name, a soft field with a visible
+  label above it.
 
 ## Colours
 
-Two themes. Defined once in the desktop as named colours; apps use the
-names, never raw values.
+One theme. Defined once in `kernel/ui/theme.h`; apps use the names,
+never raw values.
 
-| Name | Light | Dark | Used for |
-|---|---|---|---|
-| `bg` | `#F7F6F2` | `#16171B` | desktop background |
-| `surface` | `#FFFFFF` | `#202228` | windows, panels |
-| `text` | `#1C1D21` | `#ECEDEF` | main text |
-| `text-muted` | `#5B5E66` | `#A3A7B0` | secondary text (still ≥ 4.5:1 contrast) |
-| `accent` | `#2F5BD3` | `#7C9BFF` | buttons, focus, selection |
-| `saffron` | `#E07A1F` | `#F29A4A` | brand mark, highlights (sparingly) |
-| `ok` | `#1F8A4C` | `#4CC27F` | health badge, "allowed" |
-| `warn` | `#B7791F` | `#E3B04B` | low memory, "asked" |
-| `danger` | `#C53030` | `#F07272` | crashes, "denied" |
-| `border` | `#DEDCD5` | `#33363E` | lines, window borders |
+| Name | Value | Used for |
+|---|---|---|
+| `wall-top` → `wall-bottom` | `#121821` → `#26324A` | wallpaper gradient, splash |
+| `chrome` | `#0A0E14`, drawn see-through | top bar, dock |
+| `surface` | `#FBFAF7` | windows (warm ivory) |
+| `surface-2` | `#F1EEE8` | quiet buttons, panels |
+| `line` | `#E4E0D8` | hairlines, field borders |
+| `text` / `muted` | `#1D232B` / `#68707C` | text on ivory (muted 4.6:1) |
+| `on-dark` / `on-dark-muted` | `#ECEAE4` / `#8C96A5` | text on the wallpaper and bars |
+| `primary` | `#B35F1A` | the one main button (ivory text 4.7:1) |
+| `saffron` | `#E39B4E` | brand dot, caret, progress, running dots: on dark only |
+| `accent-soft` | `#F5E6D3` | selected rows |
+| `teal` | `#2A7C76` | data (CPU bars, graphs) |
+| `ok` / `warn` / `danger` | `#3A9D6B` / `#C98A2E` / `#D25C4D` | status |
+| `term-bg` / `term-text` | `#0F141B` / `#E6E8EB` | terminal |
 
 ## Type
 
-- One bitmap font family in 3 sizes: 12 (labels), 16 (body), 20 (headings).
-- Latin from a PSF font; Devanagari glyph strips pre-rendered at build time
-  (see ROADMAP Phase 12). Line height = 1.5 × size so matras don't clip.
+- IBM Plex Sans for the interface: 13 (labels), 15 (body), 15 medium
+  (titles, buttons), 22 semibold (headings), 56 light (wordmark, clock).
+  IBM Plex Mono 15 for the terminal, the editor and command output
+  (9 x 19 pixel cells). Both under the SIL Open Font License
+  (`kernel/ui/fonts-OFL.txt`).
+- Drawn smooth: `scripts/make_fonts.py` renders each size once into
+  `kernel/ui/fonts.bin` (8-bit coverage per pixel), which the kernel
+  blends with what is behind. The build itself needs nothing new.
+- Devanagari glyph strips will be pre-rendered the same way (Phase 22).
+  Line height about 1.4 x size so matras don't clip.
 
 ## Screens
 

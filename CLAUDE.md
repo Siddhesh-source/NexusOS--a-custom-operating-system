@@ -54,6 +54,7 @@ see `.env.example`).
 ```text
 build.py                 the only build entry point (build/run/test)
 scripts/                 fat32.py (disk image), test_boot.py (QEMU test harness), fetch_limine.py,
+                         make_fonts.py (re-renders kernel/ui/fonts.bin; needs Pillow; rarely run),
                          ksyms.py (symbol table), budgets.py (size/boot-time limits), bharat.gdb
 .github/workflows/       CI: one quick job (unit tests + one BIOS boot test)
 boot/limine.conf         boot menu
