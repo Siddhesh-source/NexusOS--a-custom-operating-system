@@ -17,8 +17,8 @@
 #include "string.h"
 
 #define INFO_COLS 84
-#define INFO_ROWS 28
-#define SUMMARY_H 48
+#define INFO_ROWS 24
+#define SUMMARY_H 64
 
 struct info {
     struct textbuf tb;            /* first: app_text() relies on it */
@@ -41,7 +41,7 @@ static void locked_out(void *ctx, const char *s, size_t n)
     console_unlock(f);
 }
 
-static const char *const health_buttons[] = { "1 Run checks", "2 Lock-order demo", "3 Crash demo" };
+static const char *const health_buttons[] = { "Run checks", "Lock-order demo", "Crash demo" };
 static const char *const health_cmds[] = { "checks", "lockdemo", "crashdemo" };
 
 static bool info_open(struct window *w, const char *arg)
@@ -64,7 +64,7 @@ static bool info_open(struct window *w, const char *arg)
             "  input, drawing), so it can move to user mode later unchanged.\n"
             "\nMade in India, from scratch: no Linux, no libraries.\n");
     } else {
-        textbuf_puts(&s->tb, "Press a button above (or 1, 2, 3) to run a check or a demo.\n");
+        textbuf_puts(&s->tb, "Run the live checks, or watch the lock checker and a contained\ncrash at work. Keys 1, 2 and 3 do the same.\n");
     }
     return true;
 }
@@ -74,30 +74,70 @@ static void info_close(struct window *w)
     textbuf_free(&((struct info *)w->st)->tb);
 }
 
+/* About: a title, then each "  Label:  value" line of the `about`
+ * output as two columns; other lines as plain text. */
+static void about_draw(struct info *s, struct gfx_rect body)
+{
+    int32_t x = body.x + 28, y = body.y + 20;
+    gfx_text(x - 3, y, "BharatOS", COL_TEXT, FONT_DISPLAY);
+    y += 76;
+    for (unsigned r = 0; r < s->tb.rows; r++) {
+        char line[INFO_COLS + 1];
+        memcpy(line, textbuf_row(&s->tb, r), INFO_COLS);
+        unsigned n = INFO_COLS;
+        while (n > 0 && line[n - 1] == ' ')
+            n--;
+        line[n] = '\0';
+        char *t = line;
+        while (*t == ' ')
+            t++;
+        char *colon = strchr(t, ':');
+        if (*t == '\0') {
+            y += 10;                                     /* a blank line: a gap */
+        } else if (t - line >= 8) {                      /* continues the value above */
+            gfx_text(x + 140, y, t, COL_TEXT, FONT_UI);
+            y += 22;
+        } else if (t - line == 2 && colon != NULL && colon - t < 16) {
+            *colon = '\0';
+            char *v = colon + 1;
+            while (*v == ' ')
+                v++;
+            gfx_text(x, y, t, COL_MUTED, FONT_UI);
+            gfx_text(x + 140, y, v, COL_TEXT, FONT_UI);
+            y += 22;
+        } else {
+            gfx_text(x, y, t, t == line ? COL_TEXT : COL_MUTED, t == line ? FONT_MEDIUM : FONT_UI);
+            y += 24;
+        }
+    }
+}
+
 static void info_draw(struct window *w, struct gfx_rect body)
 {
     struct info *s = w->st;
-    int32_t y = body.y + UI_PAD;
-    if (w->app == &app_health) {
-        ui_buttons(body, health_buttons, 3, true, -1, -1);
-        y = body.y + UI_BAR_H;
-        unsigned passed, failed;
-        selftest_totals(&passed, &failed);
-        char line[96];
-        ksnprintf(line, sizeof(line), "Boot self-checks: %u passed, %u failed", passed, failed);
-        gfx_text(body.x + UI_PAD, y, line, failed == 0 ? COL_OK : COL_DANGER, 1);
-        struct crash_info c;
-        crash_get_last(&c);
-        if (c.count == 0)
-            ksnprintf(line, sizeof(line), "Crashes contained since boot: none");
-        else
-            ksnprintf(line, sizeof(line), "Crashes contained since boot: %lu (last: thread \"%s\", TID %u)",
-                      c.count, c.name, c.tid);
-        gfx_text(body.x + UI_PAD, y + 20, line, c.count == 0 ? COL_MUTED : COL_WARN, 1);
-        y += SUMMARY_H;
-        gfx_fill(gfx_rect(body.x, y - 6, body.w, 1), COL_BORDER);
+    if (w->app == &app_about) {
+        about_draw(s, body);
+        return;
     }
-    textbuf_draw(&s->tb, body.x + UI_PAD, y, COL_TEXT);
+    ui_buttons(body, health_buttons, 3, 0, true, -1, -1);
+    int32_t x = body.x + UI_PAD, y = body.y + UI_BAR_H;
+    unsigned passed, failed;
+    selftest_totals(&passed, &failed);
+    char line[96];
+    gfx_round(gfx_rect(x + 2, y + 10, 10, 10), 5, failed == 0 ? COL_OK : COL_DANGER, 255);
+    gfx_text(x + 20, y, failed == 0 ? "All checks passed" : "Some checks failed", COL_TEXT, FONT_HEADING);
+    struct crash_info c;
+    crash_get_last(&c);
+    if (c.count == 0)
+        ksnprintf(line, sizeof(line), "%u boot checks passed, %u failed. No crashes so far.", passed, failed);
+    else
+        ksnprintf(line, sizeof(line), "%u boot checks passed, %u failed. %lu crash%s contained (last: \"%s\").",
+                  passed, failed, c.count, c.count == 1 ? "" : "es", c.name);
+    gfx_text(x + 20, y + 30, line, COL_MUTED, FONT_SMALL);
+    struct gfx_rect panel = gfx_rect(x, y + SUMMARY_H, body.w - 2 * UI_PAD,
+                                     INFO_ROWS * FONT_MONO_H + 16);
+    gfx_round(panel, UI_RADIUS_SM, COL_SURFACE_2, 255);
+    textbuf_draw(&s->tb, panel.x + 12, panel.y + 8, COL_TEXT);
 }
 
 static void health_run(struct window *w, int which)
@@ -129,7 +169,7 @@ static void health_key(struct window *w, uint16_t key)
 static void health_click(struct window *w, int32_t x, int32_t y)
 {
     struct gfx_rect b = wm_body(w);
-    health_run(w, ui_buttons(gfx_rect(0, 0, b.w, b.h), health_buttons, 3, false, x, y));
+    health_run(w, ui_buttons(gfx_rect(0, 0, b.w, b.h), health_buttons, 3, 0, false, x, y));
 }
 
 static void health_tick(struct window *w)
@@ -141,8 +181,10 @@ static void health_tick(struct window *w)
 
 const struct app app_health = {
     .name = "Health",
-    .w = INFO_COLS * GFX_CHAR_W + 2 * UI_PAD,
-    .h = UI_BAR_H + SUMMARY_H + INFO_ROWS * GFX_CHAR_H + UI_PAD,
+    .w = INFO_COLS * FONT_MONO_W + 2 * UI_PAD + 24,
+    .h = UI_BAR_H + SUMMARY_H + INFO_ROWS * FONT_MONO_H + 16 + UI_PAD,
+    .tile = COL_OK,
+    .icon = icon_health,
     .open = info_open,
     .close = info_close,
     .draw = info_draw,
@@ -153,8 +195,10 @@ const struct app app_health = {
 
 const struct app app_about = {
     .name = "About",
-    .w = INFO_COLS * GFX_CHAR_W + 2 * UI_PAD,
-    .h = 22 * GFX_CHAR_H + 2 * UI_PAD,
+    .w = 660,
+    .h = 540,
+    .tile = 0x3A4A63,
+    .icon = icon_about,
     .open = info_open,
     .close = info_close,
     .draw = info_draw,

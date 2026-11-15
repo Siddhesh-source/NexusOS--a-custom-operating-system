@@ -166,7 +166,8 @@ def build_kernel(fault_demo: str | None = None, bench: bool = False,
         objs.append(obj)
     for src in ASM_SOURCES:
         obj = object_for(src)
-        run([*nasm, str(src), "-o", str(obj)])
+        # -i: files pulled in with incbin (the fonts) sit next to the .asm
+        run([*nasm, "-i", str(src.parent) + os.sep, str(src), "-o", str(obj)])
         objs.append(obj)
     link_with_symbols(objs, defines)
     ok(f"Built {KERNEL_ELF}")

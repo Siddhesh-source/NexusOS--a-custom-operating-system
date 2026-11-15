@@ -135,5 +135,5 @@ bool textbuf_has(const struct textbuf *tb, const char *text)
 void textbuf_draw(const struct textbuf *tb, int32_t x, int32_t y, uint32_t rgb)
 {
     for (unsigned r = 0; r < tb->rows; r++)
-        gfx_text_n(x, y + (int32_t)r * GFX_CHAR_H, textbuf_row(tb, r), tb->cols, rgb, 1);
+        gfx_text_n(x, y + (int32_t)r * FONT_MONO_H, textbuf_row(tb, r), tb->cols, rgb, FONT_MONO);
 }

@@ -13,7 +13,7 @@
 
 #define EDIT_MAX  (16 * 1024)
 #define EDIT_COLS 72
-#define EDIT_ROWS 24
+#define EDIT_ROWS 22
 
 struct editor {
     char path[FS_PATH_MAX];
@@ -87,7 +87,7 @@ static bool edit_open(struct window *w, const char *arg)
     e->text[e->len] = '\0';
     e->readonly = s.size > EDIT_MAX - 1;
     strlcpy(e->msg, e->readonly ? "This file is too big to edit here; showing the start only."
-                                : "Ctrl+S saves.", sizeof(e->msg));
+                                : "Ctrl+S saves", sizeof(e->msg));
     e->cur = e->len;                      /* ready to add at the end */
     set_title(w);
     return true;
@@ -101,15 +101,15 @@ static void edit_close(struct window *w)
 static void edit_draw(struct window *w, struct gfx_rect body)
 {
     struct editor *e = w->st;
-    ui_buttons(body, edit_buttons, 1, true, -1, -1);
+    ui_buttons(body, edit_buttons, 1, 0, true, -1, -1);
     int32_t x0 = body.x + UI_PAD, y0 = body.y + UI_BAR_H;
     unsigned r = 0, c = 0;
     for (size_t i = 0; i < e->len && r < e->top + EDIT_ROWS; i++) {
         char ch = e->text[i];
         if (ch != '\n' && r >= e->top) {
             char shown = ch >= 0x20 && ch < 0x7F ? ch : '.';
-            gfx_text_n(x0 + (int32_t)c * GFX_CHAR_W, y0 + (int32_t)(r - e->top) * GFX_CHAR_H,
-                       &shown, 1, COL_TEXT, 1);
+            gfx_text_n(x0 + (int32_t)c * FONT_MONO_W, y0 + (int32_t)(r - e->top) * FONT_MONO_H,
+                       &shown, 1, COL_TEXT, FONT_MONO);
         }
         if (ch == '\n' || ++c >= EDIT_COLS) {
             r++;
@@ -118,10 +118,10 @@ static void edit_draw(struct window *w, struct gfx_rect body)
     }
     pos_of(e, e->cur, &r, &c);
     if (r >= e->top && r < e->top + EDIT_ROWS)
-        gfx_fill(gfx_rect(x0 + (int32_t)c * GFX_CHAR_W, y0 + (int32_t)(r - e->top) * GFX_CHAR_H,
-                          2, GFX_CHAR_H), COL_ACCENT);
-    gfx_fill(gfx_rect(body.x, body.y + body.h - 30, body.w, 1), COL_BORDER);
-    gfx_text(x0, body.y + body.h - 22, e->msg, COL_MUTED, 1);
+        gfx_fill(gfx_rect(x0 + (int32_t)c * FONT_MONO_W, y0 + (int32_t)(r - e->top) * FONT_MONO_H + 1,
+                          2, FONT_MONO_H - 2), COL_PRIMARY);
+    gfx_fill(gfx_rect(body.x, body.y + body.h - 36, body.w, 1), COL_LINE);
+    gfx_text(x0, body.y + body.h - 27, e->msg, COL_MUTED, FONT_SMALL);
 }
 
 static void save(struct window *w)
@@ -190,7 +190,7 @@ static void edit_key(struct window *w, uint16_t key)
 static void edit_click(struct window *w, int32_t x, int32_t y)
 {
     struct gfx_rect b = wm_body(w);
-    if (ui_buttons(gfx_rect(0, 0, b.w, b.h), edit_buttons, 1, false, x, y) == 0) {
+    if (ui_buttons(gfx_rect(0, 0, b.w, b.h), edit_buttons, 1, 0, false, x, y) == 0) {
         save(w);
         wm_redraw(w);
     }
@@ -208,8 +208,8 @@ const char *editor_text(struct window *w, bool *unsaved)
 
 const struct app app_editor = {
     .name = "Text editor",
-    .w = EDIT_COLS * GFX_CHAR_W + 2 * UI_PAD,
-    .h = UI_BAR_H + EDIT_ROWS * GFX_CHAR_H + 40,
+    .w = EDIT_COLS * FONT_MONO_W + 2 * UI_PAD,
+    .h = UI_BAR_H + EDIT_ROWS * FONT_MONO_H + 48,
     .open = edit_open,
     .close = edit_close,
     .draw = edit_draw,

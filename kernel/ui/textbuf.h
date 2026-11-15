@@ -44,7 +44,8 @@ const char *textbuf_row(const struct textbuf *tb, unsigned r);
 /* True if `text` appears within one row (self-tests). */
 bool textbuf_has(const struct textbuf *tb, const char *text);
 
-/* Draw the grid with its top-left corner at (x, y). */
+/* Draw the grid in the monospace font (FONT_MONO_W x FONT_MONO_H cells)
+ * with its top-left corner at (x, y). */
 void textbuf_draw(const struct textbuf *tb, int32_t x, int32_t y, uint32_t rgb);
 
 #endif /* BHARAT_TEXTBUF_H */

@@ -14,8 +14,9 @@
 #include "string.h"
 
 #define FILES_MAX 64
-#define ROW_H     20
-#define LIST_ROWS 18
+#define ROW_H     32
+#define LIST_ROWS 12
+#define LIST_Y    (UI_BAR_H + 36)        /* first row, from the body top */
 
 enum { NORMAL, NEW_FILE, NEW_FOLDER };
 
@@ -127,38 +128,50 @@ static void keep_visible(struct files *f)
 static void files_draw(struct window *w, struct gfx_rect body)
 {
     struct files *f = w->st;
-    ui_buttons(body, files_buttons, 5, true, -1, -1);
+    ui_buttons(body, files_buttons, 5, -1, true, -1, -1);
     int32_t x = body.x + UI_PAD, y = body.y + UI_BAR_H;
-    gfx_text(x, y, f->cwd, COL_MUTED, 1);
-    y += 24;
-    if (f->n == 0)
-        gfx_text(x, y + 2, "(this folder is empty)", COL_MUTED, 1);
+    gfx_text(x, y + 4, f->cwd, COL_MUTED, FONT_MEDIUM);
+    y = body.y + LIST_Y;
+    if (f->n == 0) {
+        const char *e = "This folder is empty";
+        gfx_text(body.x + (body.w - gfx_text_width(e, FONT_UI)) / 2, y + 80, e, COL_MUTED, FONT_UI);
+    }
     for (unsigned i = f->top; i < f->n && i < f->top + LIST_ROWS; i++, y += ROW_H) {
         struct fs_dirent *e = &f->ents[i];
         if (i == f->sel)
-            gfx_fill(gfx_rect(body.x, y, body.w, ROW_H), COL_SELECT);
+            gfx_round(gfx_rect(body.x + 8, y, body.w - 16, ROW_H), UI_RADIUS_SM, COL_ACCENT_SOFT, 255);
         if (e->type == FS_DIR) {
-            gfx_fill(gfx_rect(x, y + 5, 16, 11), COL_SAFFRON);       /* a folder */
-            gfx_fill(gfx_rect(x, y + 3, 7, 3), COL_SAFFRON);
+            gfx_round(gfx_rect(x, y + 9, 8, 5), 1, 0xC98A3A, 255);          /* a folder */
+            gfx_round(gfx_rect(x, y + 11, 18, 12), 2, 0xE0A458, 255);
         } else {
-            gfx_frame(gfx_rect(x + 2, y + 2, 12, 16), COL_MUTED);     /* a page */
+            gfx_round(gfx_rect(x + 2, y + 7, 14, 18), 2, COL_LINE, 255);   /* a page */
+            gfx_round(gfx_rect(x + 3, y + 8, 12, 16), 2, COL_SURFACE, 255);
+            gfx_fill(gfx_rect(x + 6, y + 13, 6, 1), COL_MUTED);
+            gfx_fill(gfx_rect(x + 6, y + 17, 6, 1), COL_MUTED);
         }
-        gfx_text(x + 24, y + 2, e->name, COL_TEXT, 1);
+        gfx_text(x + 30, y + 5, e->name, COL_TEXT, FONT_UI);
         char size[24];
         if (e->type == FS_DIR)
-            ksnprintf(size, sizeof(size), "%lu items", e->size);
+            ksnprintf(size, sizeof(size), "%lu item%s", e->size, e->size == 1 ? "" : "s");
         else
             ksnprintf(size, sizeof(size), "%lu bytes", e->size);
-        gfx_text(body.x + body.w - UI_PAD - (int32_t)strlen(size) * GFX_CHAR_W, y + 2, size, COL_MUTED, 1);
+        gfx_text(body.x + body.w - UI_PAD - 8 - gfx_text_width(size, FONT_SMALL), y + 7, size,
+                 COL_MUTED, FONT_SMALL);
     }
-    char line[96];
-    if (f->mode != NORMAL)
-        ksnprintf(line, sizeof(line), "Name of the new %s: %s_   (Enter: create, Esc: cancel)",
-                  f->mode == NEW_FILE ? "file" : "folder", f->name);
-    else
-        strlcpy(line, f->msg[0] ? f->msg : "Enter opens, Backspace goes up, n new file, d new folder",
-                sizeof(line));
-    gfx_text(x, body.y + body.h - 24, line, f->mode != NORMAL ? COL_ACCENT : COL_MUTED, 1);
+    int32_t by = body.y + body.h - 44;
+    gfx_fill(gfx_rect(body.x, by - 8, body.w, 1), COL_LINE);
+    if (f->mode != NORMAL) {
+        const char *label = f->mode == NEW_FILE ? "New file name" : "New folder name";
+        int32_t lw = gfx_text_width(label, FONT_SMALL);
+        gfx_text(x, by + 9, label, COL_MUTED, FONT_SMALL);
+        struct gfx_rect field = gfx_rect(x + lw + 12, by + 2, body.w - 2 * UI_PAD - lw - 12, 32);
+        gfx_round(field, UI_RADIUS_SM, COL_PRIMARY, 255);                  /* focus ring */
+        gfx_round(gfx_grow(field, -2), UI_RADIUS_SM - 2, COL_SURFACE, 255);
+        int32_t tw = gfx_text(field.x + 10, field.y + 5, f->name, COL_TEXT, FONT_UI);
+        gfx_fill(gfx_rect(field.x + 11 + tw, field.y + 8, 2, 16), COL_PRIMARY);
+    } else {
+        gfx_text(x, by + 8, f->msg[0] ? f->msg : "Click a file twice to open it", COL_MUTED, FONT_SMALL);
+    }
 }
 
 static void action(struct window *w, int which)
@@ -211,11 +224,11 @@ static void files_click(struct window *w, int32_t x, int32_t y)
 {
     struct files *f = w->st;
     struct gfx_rect b = wm_body(w);
-    int hit = ui_buttons(gfx_rect(0, 0, b.w, b.h), files_buttons, 5, false, x, y);
+    int hit = ui_buttons(gfx_rect(0, 0, b.w, b.h), files_buttons, 5, -1, false, x, y);
     if (hit >= 0) {
         action(w, hit);
-    } else if (y >= UI_BAR_H + 24) {
-        unsigned i = f->top + (unsigned)(y - UI_BAR_H - 24) / ROW_H;
+    } else if (y >= LIST_Y) {
+        unsigned i = f->top + (unsigned)(y - LIST_Y) / ROW_H;
         if (i < f->n && i < f->top + LIST_ROWS) {
             if (i == f->sel)
                 open_selected(w);          /* a second click opens */
@@ -265,8 +278,10 @@ const char *files_folder(struct window *w)
 
 const struct app app_files = {
     .name = "Files",
-    .w = 560,
-    .h = UI_BAR_H + 24 + LIST_ROWS * ROW_H + 40,
+    .w = 600,
+    .h = LIST_Y + LIST_ROWS * ROW_H + 60,
+    .tile = 0xEFE3CC,
+    .icon = icon_files,
     .open = files_open,
     .draw = files_draw,
     .key = files_key,

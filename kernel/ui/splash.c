@@ -21,16 +21,15 @@ unsigned splash_steps_done(void)
 
 static void draw_progress(const char *what)
 {
-    int32_t w = screen.w * 2 / 3, x = (screen.w - w) / 2, y = area_h - 72;
+    int32_t w = 320, x = (screen.w - w) / 2, y = area_h - 64;
     gfx_target(&screen);
-    gfx_frame(gfx_rect(x, y, w, 16), COL_BORDER);
-    gfx_fill(gfx_rect(x + 1, y + 1, w - 2, 14), COL_SURFACE);
-    gfx_fill(gfx_rect(x + 2, y + 2, (w - 4) * (int32_t)done / SPLASH_STEPS, 12), COL_SAFFRON);
-    gfx_fill(gfx_rect(0, y + 24, screen.w, GFX_CHAR_H), COL_BG);
-    if (what != NULL) {
-        int32_t tw = (int32_t)strlen(what) * GFX_CHAR_W;
-        gfx_text((screen.w - tw) / 2, y + 24, what, COL_MUTED, 1);
-    }
+    gfx_fill(gfx_rect(x - 4, y - 4, w + 8, 12), COL_WALL_TOP);
+    gfx_round(gfx_rect(x, y, w, 4), 2, 0x2B3648, 255);
+    gfx_round(gfx_rect(x, y, w * (int32_t)done / SPLASH_STEPS, 4), 2, COL_SAFFRON, 255);
+    gfx_fill(gfx_rect(0, y + 16, screen.w, gfx_line_height(FONT_SMALL)), COL_WALL_TOP);
+    if (what != NULL)
+        gfx_text((screen.w - gfx_text_width(what, FONT_SMALL)) / 2, y + 16, what,
+                 COL_ON_DARK_MUTED, FONT_SMALL);
 }
 
 void splash_start(void *addr, uint64_t width, uint64_t height, uint64_t pitch,
@@ -49,22 +48,21 @@ void splash_start(void *addr, uint64_t width, uint64_t height, uint64_t pitch,
     if (width < 640 || height < 600)
         return;                          /* too small: text console only */
 
-    /* The boot log keeps 25 rows (what the console promises); the
-     * splash takes the rest, at most half the screen. */
-    area_h = (int32_t)height - 25 * GFX_CHAR_H;
+    /* The boot log keeps 25 rows (what the console promises), dimmed into
+     * the same dark background; the splash takes the rest, at most half
+     * the screen. */
+    area_h = (int32_t)height - 25 * 16;
     if (area_h > (int32_t)height / 2)
         area_h = (int32_t)height / 2;
     if (!fbcon_set_top((uint64_t)area_h))
         return;
     gfx_target(&screen);
-    gfx_fill(gfx_rect(0, 0, screen.w, area_h), COL_BG);
-    gfx_fill(gfx_rect(0, area_h - 4, screen.w, 4), COL_SAFFRON);
+    gfx_fill(gfx_rect(0, 0, screen.w, area_h), COL_WALL_TOP);
     const char *name = "BharatOS";
-    int32_t tw = (int32_t)strlen(name) * GFX_CHAR_W * 4;
     int32_t ty = area_h / 2 - 96;
-    gfx_text((screen.w - tw) / 2, ty, name, COL_SAFFRON, 4);
+    gfx_text((screen.w - gfx_text_width(name, FONT_DISPLAY)) / 2, ty, name, COL_ON_DARK, FONT_DISPLAY);
     const char *sub = "an operating system written from scratch";
-    gfx_text((screen.w - (int32_t)strlen(sub) * GFX_CHAR_W) / 2, ty + 72, sub, COL_TEXT, 1);
+    gfx_text((screen.w - gfx_text_width(sub, FONT_UI)) / 2, ty + 76, sub, COL_ON_DARK_MUTED, FONT_UI);
     shown = true;
     draw_progress("Starting");
 }
