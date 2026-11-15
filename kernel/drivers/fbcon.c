@@ -6,8 +6,8 @@
 
 #define CELL_W 8
 #define CELL_H 16
-#define FG 0x00E6E6E6u          /* near-white text */
-#define BG 0x00102030u          /* dark blue-grey background */
+#define FG 0x00384353u          /* dim slate: the log stays quiet under the splash */
+#define BG 0x00121821u          /* the splash background (COL_WALL_TOP) */
 
 static struct {
     uint8_t *base;

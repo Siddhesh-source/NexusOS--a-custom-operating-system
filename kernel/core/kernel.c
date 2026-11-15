@@ -17,6 +17,7 @@
 #include "bench.h"
 #include "fbcon.h"
 #include "splash.h"
+#include "font.h"
 #include "acpi.h"
 #include "pci.h"
 #include "hw_test.h"
@@ -211,6 +212,8 @@ static void load_boot_bundle(void)
  * the bootloader set up a framebuffer we can draw on. */
 static void start_screen(void)
 {
+    if (!font_init())
+        serial_puts("[ui] font data damaged; using the built-in 8x8 font\n");
     struct limine_framebuffer_response *r = framebuffer_request.response;
     if (r == NULL || r->framebuffer_count == 0)
         return;

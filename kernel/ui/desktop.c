@@ -10,6 +10,7 @@
 #include "rcu.h"
 #include "kprintf.h"
 #include "string.h"
+#include "rtc.h"
 
 const struct app *const desktop_apps[] = {
     &app_terminal, &app_files, &app_monitor, &app_health, &app_about,
@@ -48,29 +49,40 @@ const char *login_message(void)
     return ls.msg;
 }
 
-static void centred(int32_t y, const char *s, uint32_t rgb, int32_t scale)
+static void centred(int32_t y, const char *s, uint32_t rgb, enum font_id f)
 {
-    struct gfx_surface *b = wm_back();
-    gfx_text((b->w - (int32_t)strlen(s) * GFX_CHAR_W * scale) / 2, y, s, rgb, scale);
+    gfx_text((wm_back()->w - gfx_text_width(s, f)) / 2, y, s, rgb, f);
 }
 
+/* A lock screen on the wallpaper: the time, a round avatar with the
+ * first letter of the name, and a soft name (or password) field. */
 void login_draw(void)
 {
     struct gfx_surface *b = wm_back();
-    int32_t cy = b->h / 2;
-    centred(cy - 200, "BharatOS", COL_SAFFRON, 4);
-    centred(cy - 124, "an operating system written from scratch", COL_MUTED, 1);
-    struct gfx_rect box = gfx_rect(b->w / 2 - 220, cy - 80, 440, 176);
-    gfx_fill(box, COL_SURFACE);
-    gfx_frame(box, COL_BORDER);
-    char label[64];
+    int32_t cx = b->w / 2, cy = b->h / 2;
+    unsigned h, m, sec;
+    char clock[8] = "";
+    if (rtc_time(&h, &m, &sec))
+        ksnprintf(clock, sizeof(clock), "%02u:%02u", h, m);
+    centred(cy - 250, clock, COL_ON_DARK, FONT_DISPLAY);
+    centred(cy - 170, "BharatOS", COL_ON_DARK_MUTED, FONT_MEDIUM);
+
+    struct gfx_rect av = gfx_rect(cx - 40, cy - 100, 80, 80);
+    gfx_round(gfx_grow(av, 1), 41, 0xFFFFFF, 40);
+    gfx_round(av, 40, ls.name[0] ? COL_PRIMARY : COL_WALL_BOTTOM, 255);
+    char initial[2] = { ls.name[0] >= 'a' && ls.name[0] <= 'z' ? (char)(ls.name[0] - 32) : ls.name[0], 0 };
+    if (initial[0] != '\0')
+        gfx_text(cx - gfx_text_width(initial, FONT_HEADING) / 2, av.y + 25, initial, COL_SURFACE, FONT_HEADING);
+
+    char label[48];
     if (ls.password)
-        ksnprintf(label, sizeof(label), "Password for %s:", ls.name);
+        ksnprintf(label, sizeof(label), "Password for %s", ls.name);
     else
-        strlcpy(label, "Welcome! Type your name:", sizeof(label));
-    gfx_text(box.x + 24, box.y + 24, label, COL_TEXT, 1);
-    struct gfx_rect field = gfx_rect(box.x + 24, box.y + 52, box.w - 48, 32);
-    gfx_frame(field, COL_ACCENT);
+        strlcpy(label, "Your name", sizeof(label));
+    centred(cy + 4, label, COL_ON_DARK_MUTED, FONT_SMALL);
+    struct gfx_rect field = gfx_rect(cx - 150, cy + 28, 300, 42);
+    gfx_round(gfx_grow(field, 1), 22, 0xFFFFFF, 50);
+    gfx_round(field, 21, COL_WALL_TOP, 200);
     char shown[40];
     size_t n = strlen(ls.password ? ls.pass : ls.name);
     if (ls.password) {
@@ -79,13 +91,13 @@ void login_draw(void)
     } else {
         strlcpy(shown, ls.name, sizeof(shown));
     }
-    int32_t tw = gfx_text(field.x + 8, field.y + 8, shown, COL_TEXT, 1);
-    gfx_fill(gfx_rect(field.x + 8 + tw, field.y + 6, 2, 20), COL_ACCENT);
-    gfx_text(box.x + 24, box.y + 96, "Then press Enter.", COL_MUTED, 1);
+    int32_t tw = gfx_text_width(shown, FONT_UI);
+    gfx_text(cx - tw / 2, field.y + 10, shown, COL_ON_DARK, FONT_UI);
+    gfx_fill(gfx_rect(cx + (tw + 1) / 2 + 2, field.y + 11, 2, 20), COL_SAFFRON);
     if (ls.msg[0] != '\0')
-        gfx_text(box.x + 24, box.y + 128, ls.msg, COL_DANGER, 1);
-    centred(b->h - 40, "Any name works: letters, digits, - or _. Names in /etc/users need their password.",
-            COL_MUTED, 1);
+        centred(cy + 84, ls.msg, 0xF0A096, FONT_SMALL);
+    else
+        centred(cy + 84, "Press Enter to sign in", COL_ON_DARK_MUTED, FONT_SMALL);
 }
 
 static void enter_desktop(void)
@@ -201,6 +213,8 @@ static int64_t desktop_main(void *arg)
         if (now >= next_tick) {
             if (logged_in)
                 wm_tick();
+            else
+                wm_damage_all();                   /* the lock screen's clock */
             next_tick = now + SCHED_TIMER_HZ;
         }
         if (wm_compose() && announce) {

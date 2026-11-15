@@ -138,8 +138,9 @@ def session(shot: Path) -> List[tuple]:
 
 
 def check_screenshot(shot: Path) -> bool:
-    """The screen QEMU saved must be the desktop: a white top bar, the
-    desktop background below, and many colours (windows, text)."""
+    """The screen QEMU saved must be the desktop: the wallpaper's last row
+    (#26324A) at the bottom left, a top bar darker than the wallpaper just
+    below it, and many colours (windows, smooth text, the dock)."""
     try:
         data = shot.read_bytes()
         magic, size, maxval, pixels = data.split(b"\n", 3)
@@ -150,9 +151,10 @@ def check_screenshot(shot: Path) -> bool:
         return False
     px = lambda x, y: tuple(pixels[(y * w + x) * 3:(y * w + x) * 3 + 3])
     colours = {px(x, y) for y in range(0, h, 7) for x in range(0, w, 7)}
-    ok = px(2, 2) == (0xFF, 0xFF, 0xFF) and px(2, h - 2) == (0xF7, 0xF6, 0xF2) and len(colours) >= 8
+    ok = (px(2, h - 1) == (0x26, 0x32, 0x4A) and sum(px(2, 2)) < sum(px(2, 40))
+          and len(colours) >= 32)
     print(f"[{'PASS' if ok else 'FAIL'}] screenshot {shot.name}: {w}x{h}, {len(colours)} colours sampled, "
-          f"top bar {px(2, 2)}, background {px(2, h - 2)}")
+          f"top bar {px(2, 2)}, wallpaper {px(2, 40)} .. {px(2, h - 1)}")
     return ok
 
 

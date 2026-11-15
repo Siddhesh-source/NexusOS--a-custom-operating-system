@@ -35,6 +35,9 @@ struct window;
 struct app {
     const char *name;
     int32_t w, h;                                  /* body size */
+    bool dark;                                     /* dark window (terminal) */
+    uint32_t tile;                                 /* dock tile colour */
+    void (*icon)(struct gfx_rect tile);            /* draws the dock icon */
     bool (*open)(struct window *w, const char *arg);
     void (*close)(struct window *w);
     void (*draw)(struct window *w, struct gfx_rect body);
@@ -94,15 +97,15 @@ struct gfx_surface *wm_back(void);
 void wm_get_stats(struct wm_stats *out);
 /* Rectangle of top-bar item `i`: apps 0..n-1, then "Log out", then the
  * health badge (self-tests click them). */
-struct gfx_rect wm_topbar_item(unsigned i);
+struct gfx_rect wm_ui_item(unsigned i);
 
 /* ---- small shared widgets ------------------------------------------------ */
 
-#define UI_BAR_H 40                /* a row of buttons at the top of a body */
+#define UI_BAR_H 56                /* a row of buttons at the top of a body */
 
 /* A row of buttons along the top of `body`. With draw = true, draws them;
  * either way returns the index of the button at (px, py), or -1. */
-int ui_buttons(struct gfx_rect body, const char *const *labels, unsigned n,
+int ui_buttons(struct gfx_rect body, const char *const *labels, unsigned n, int primary,
                bool draw, int32_t px, int32_t py);
 
 #endif /* BHARAT_WM_H */

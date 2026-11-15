@@ -28,6 +28,13 @@ extern const struct app app_terminal, app_files, app_monitor, app_health,
 extern const struct app *const desktop_apps[];
 extern const unsigned desktop_app_count;
 
+/* Dock icons (icons.c), drawn on the app's tile. */
+void icon_terminal(struct gfx_rect t);
+void icon_files(struct gfx_rect t);
+void icon_monitor(struct gfx_rect t);
+void icon_health(struct gfx_rect t);
+void icon_about(struct gfx_rect t);
+
 /* The text a Terminal, Health or About window shows; NULL for others. */
 struct textbuf *app_text(struct window *w);
 

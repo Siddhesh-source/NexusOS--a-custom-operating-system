@@ -9,7 +9,7 @@
 #include "input.h"
 
 static struct gfx_surface *screen;
-static struct gfx_surface back;
+static struct gfx_surface back, wall;          /* wall: the wallpaper, drawn once */
 static struct window wins[WM_MAX_WINDOWS];
 static struct window *order[WM_MAX_WINDOWS];   /* bottom to top */
 static unsigned nwin;
@@ -19,38 +19,50 @@ static char user[24];
 static void (*logout_fn)(void);
 static void (*backdrop)(void);
 static void topbar_refresh(void);
+static struct gfx_rect dock_rect(void);
 static struct gfx_rect damage;
 static struct wm_stats stats;
-static unsigned opened;                         /* for placing new windows */
 
 /* The mouse pointer and a window being dragged. */
 static int32_t px, py;
+static bool pointer_shown;                     /* hidden until the mouse moves */
 static uint8_t buttons;
 static struct window *dragging;
 static int32_t drag_dx, drag_dy;
 
 #define CURSOR_W 12
 #define CURSOR_H 19
-#define CLOSE_W  28
+#define CLOSE_W  44                 /* the close button's click area */
+#define SHADOW   34                 /* how far a window's shadow reaches */
+#define SLOT_W   76                 /* one app in the dock */
+#define TILE     44
+
+static bool alloc_surface(struct gfx_surface *s, int32_t w, int32_t h)
+{
+    if (s->px == NULL || s->w != w || s->h != h) {
+        kfree(s->px);
+        s->px = kmalloc((size_t)w * (size_t)h * 4);
+        if (s->px == NULL)
+            return false;
+    }
+    s->w = s->stride = w;
+    s->h = h;
+    return true;
+}
 
 bool wm_init(struct gfx_surface *scr, int32_t w, int32_t h)
 {
-    if (w < 640 || h < 480)
+    if (w < 640 || h < 480 || !alloc_surface(&back, w, h) || !alloc_surface(&wall, w, h))
         return false;
-    if (back.px == NULL || back.w != w || back.h != h) {
-        kfree(back.px);
-        back.px = kmalloc((size_t)w * (size_t)h * 4);
-        if (back.px == NULL)
-            return false;
-    }
-    back.w = back.stride = w;
-    back.h = h;
+    gfx_target(&wall);
+    gfx_gradient(gfx_rect(0, 0, w, h), COL_WALL_TOP, COL_WALL_BOTTOM);
     screen = scr;
     memset(wins, 0, sizeof(wins));
     nwin = 0;
     dragging = NULL;
     px = w / 2;
     py = h / 2;
+    pointer_shown = false;
     wm_damage_all();
     return true;
 }
@@ -100,15 +112,21 @@ void wm_damage_all(void)
     wm_damage(gfx_rect(0, 0, back.w, back.h));
 }
 
+/* A window and its shadow. */
+static struct gfx_rect outer(const struct window *w)
+{
+    return gfx_grow(w->r, SHADOW);
+}
+
 void wm_redraw(struct window *w)
 {
     if (w != NULL && w->used)
-        wm_damage(w->r);
+        wm_damage(outer(w));
 }
 
 struct gfx_rect wm_body(const struct window *w)
 {
-    return gfx_rect(w->r.x + 1, w->r.y + UI_TITLE_H, w->r.w - 2, w->r.h - UI_TITLE_H - 1);
+    return gfx_rect(w->r.x, w->r.y + UI_TITLE_H, w->r.w, w->r.h - UI_TITLE_H);
 }
 
 /* ---- windows ------------------------------------------------------------- */
@@ -143,8 +161,9 @@ void wm_focus(struct window *w)
     for (unsigned j = (unsigned)i; j + 1 < nwin; j++)
         order[j] = order[j + 1];
     order[nwin - 1] = w;
-    wm_redraw(old);                         /* its title bar loses the colour */
+    wm_redraw(old);                         /* its shadow and title go quiet */
     wm_redraw(w);
+    topbar_refresh();                       /* the top bar names the focused app */
 }
 
 void wm_move(struct window *w, int32_t x, int32_t y)
@@ -157,16 +176,38 @@ void wm_move(struct window *w, int32_t x, int32_t y)
     if (x < 64 - w->r.w) x = 64 - w->r.w;
     if (y > back.h - UI_TITLE_H) y = back.h - UI_TITLE_H;
     if (y < UI_TOPBAR_H) y = UI_TOPBAR_H;
-    wm_damage(w->r);
+    wm_damage(outer(w));
     w->r.x = x;
     w->r.y = y;
-    wm_damage(w->r);
+    wm_damage(outer(w));
 }
 
 void wm_set_title(struct window *w, const char *title)
 {
     strlcpy(w->title, title, sizeof(w->title));
     wm_damage(gfx_rect(w->r.x, w->r.y, w->r.w, UI_TITLE_H));
+}
+
+/* New windows open centred in the space between the top bar and the
+ * dock, moved down and right only while another window sits there. */
+static void place(struct window *w)
+{
+    int32_t top = UI_TOPBAR_H + 16, avail = back.h - top - UI_DOCK_H;
+    int32_t x = (back.w - w->r.w) / 2, y = top + (avail - w->r.h) / 2;
+    if (y < top) y = top;
+    for (unsigned tries = 0; tries < WM_MAX_WINDOWS; tries++) {
+        bool taken = false;
+        for (unsigned i = 0; i < nwin; i++)
+            taken |= order[i]->r.x == x && order[i]->r.y == y;
+        if (!taken)
+            break;
+        x += 32;
+        y += 28;
+    }
+    if (x + w->r.w > back.w) x = back.w - w->r.w;
+    if (y + w->r.h > back.h) y = back.h - w->r.h;
+    w->r.x = x > 0 ? x : 0;
+    w->r.y = y > UI_TOPBAR_H ? y : UI_TOPBAR_H;
 }
 
 struct window *wm_open(const struct app *a, const char *arg)
@@ -180,21 +221,20 @@ struct window *wm_open(const struct app *a, const char *arg)
     memset(w, 0, sizeof(*w));
     w->app = a;
     strlcpy(w->title, a->name, sizeof(w->title));
-    int32_t ww = a->w + 2, wh = a->h + UI_TITLE_H + 1;
+    int32_t ww = a->w, wh = a->h + UI_TITLE_H;
     if (ww > back.w) ww = back.w;
     if (wh > back.h - UI_TOPBAR_H) wh = back.h - UI_TOPBAR_H;
-    unsigned k = opened++ % 6;
-    w->r = gfx_rect(48 + 40 * (int32_t)k, UI_TOPBAR_H + 24 + 32 * (int32_t)k, ww, wh);
-    if (w->r.x + ww > back.w) w->r.x = back.w - ww;
-    if (w->r.y + wh > back.h) w->r.y = back.h - wh;
-    w->used = true;                          /* open() may set the title */
+    w->r = gfx_rect(0, 0, ww, wh);
+    w->used = true;                          /* open() may set the title or size */
     if (a->open != NULL && !a->open(w, arg)) {
         w->used = false;
         return NULL;
     }
+    place(w);
     order[nwin++] = w;
-    wm_redraw(wm_focused() == w && nwin > 1 ? order[nwin - 2] : NULL);
+    wm_redraw(nwin > 1 ? order[nwin - 2] : NULL);
     wm_redraw(w);
+    topbar_refresh();
     return w;
 }
 
@@ -212,16 +252,16 @@ void wm_close(struct window *w)
     nwin--;
     if (dragging == w)
         dragging = NULL;
-    wm_damage(w->r);
+    wm_damage(outer(w));
     wm_redraw(wm_focused());
     w->used = false;
+    topbar_refresh();
 }
 
 void wm_close_all(void)
 {
     while (nwin > 0)
         wm_close(order[nwin - 1]);
-    opened = 0;
 }
 
 struct window *wm_show(const struct app *a)
@@ -233,11 +273,10 @@ struct window *wm_show(const struct app *a)
     return w;
 }
 
-/* ---- the top bar ------------------------------------------------------------ */
+/* ---- top bar and dock --------------------------------------------------- */
 
-/* The badge and the text right of it, worked out once a second (the
- * clock) rather than at every draw. */
-static char badge[40], right[64];
+/* Worked out once a second (the clock) rather than at every draw. */
+static char status[40], right[64];
 static bool healthy;
 
 static void topbar_refresh(void)
@@ -246,59 +285,87 @@ static void topbar_refresh(void)
     selftest_totals(&passed, &failed);
     healthy = failed == 0;
     if (healthy)
-        ksnprintf(badge, sizeof(badge), "Healthy: %u checks", passed);
+        ksnprintf(status, sizeof(status), "%u checks passed", passed);
     else
-        ksnprintf(badge, sizeof(badge), "%u checks failed", failed);
-    char clock[16] = "";
+        ksnprintf(status, sizeof(status), "%u checks failed", failed);
+    char clock[8] = "";
     if (rtc_time(&h, &m, &s))
-        ksnprintf(clock, sizeof(clock), "  %02u:%02u:%02u", h, m, s);
-    ksnprintf(right, sizeof(right), "%s  |  %u CPUs%s", user, smp_cpu_count(), clock);
+        ksnprintf(clock, sizeof(clock), "%02u:%02u", h, m);
+    ksnprintf(right, sizeof(right), "%s     %u CPUs     %s", user, smp_cpu_count(), clock);
     wm_damage(gfx_rect(0, 0, back.w, UI_TOPBAR_H));
+    if (napps > 0)
+        wm_damage(gfx_grow(dock_rect(), 2));      /* running dots, focus highlight */
 }
 
-/* Items: apps 0..napps-1 from the left, then "Log out" and the health
- * badge from the right (after the user, CPUs and clock). */
-struct gfx_rect wm_topbar_item(unsigned i)
+static struct gfx_rect dock_rect(void)
+{
+    int32_t w = (int32_t)napps * SLOT_W + 24, h = 84;
+    return gfx_rect((back.w - w) / 2, back.h - h - 12, w, h);
+}
+
+/* Items: the apps in the dock 0..n-1, then "Log out" and the health
+ * status in the top bar. */
+struct gfx_rect wm_ui_item(unsigned i)
 {
     if (i < napps) {
-        int32_t x = 8 + 8 * GFX_CHAR_W + 16;    /* after the "BharatOS" mark */
-        for (unsigned j = 0; j < i; j++)
-            x += (int32_t)strlen(apps[j]->name) * GFX_CHAR_W + 16 + 4;
-        return gfx_rect(x, 4, (int32_t)strlen(apps[i]->name) * GFX_CHAR_W + 16, 24);
+        struct gfx_rect d = dock_rect();
+        return gfx_rect(d.x + 12 + (int32_t)i * SLOT_W, d.y + 8, SLOT_W, d.h - 16);
     }
-    int32_t x = back.w - 8 - (7 * GFX_CHAR_W + 16);
+    int32_t lw = gfx_text_width("Log out", FONT_SMALL) + 20;
+    int32_t x = back.w - 8 - lw;
     if (i == napps)
-        return gfx_rect(x, 4, 7 * GFX_CHAR_W + 16, 24);
-    x -= 16 + (int32_t)strlen(right) * GFX_CHAR_W + 16 + (int32_t)strlen(badge) * GFX_CHAR_W + 16;
-    return gfx_rect(x, 4, (int32_t)strlen(badge) * GFX_CHAR_W + 16, 24);
-}
-
-static void button(struct gfx_rect r, const char *label, uint32_t bg, uint32_t fg)
-{
-    gfx_fill(r, bg);
-    gfx_text(r.x + 8, r.y + (r.h - GFX_CHAR_H) / 2, label, fg, 1);
+        return gfx_rect(x, 3, lw, UI_TOPBAR_H - 6);
+    int32_t sw = gfx_text_width(status, FONT_SMALL) + 34;
+    x -= 24 + gfx_text_width(right, FONT_SMALL) + 24 + sw;
+    return gfx_rect(x, 3, sw, UI_TOPBAR_H - 6);
 }
 
 static void draw_topbar(void)
 {
-    gfx_fill(gfx_rect(0, 0, back.w, UI_TOPBAR_H - 1), COL_SURFACE);
-    gfx_fill(gfx_rect(0, UI_TOPBAR_H - 1, back.w, 1), COL_BORDER);
-    gfx_text(8, 8, "BharatOS", COL_SAFFRON, 1);
+    gfx_blend(gfx_rect(0, 0, back.w, UI_TOPBAR_H), COL_CHROME, 170);
+    gfx_blend(gfx_rect(0, UI_TOPBAR_H - 1, back.w, 1), 0xFFFFFF, 16);
+    int32_t ty = (UI_TOPBAR_H - gfx_line_height(FONT_MEDIUM)) / 2;
+    gfx_round(gfx_rect(16, UI_TOPBAR_H / 2 - 4, 8, 8), 4, COL_SAFFRON, 255);
+    int32_t x = 32 + gfx_text(32, ty, "BharatOS", COL_ON_DARK, FONT_MEDIUM);
+    struct window *f = wm_focused();
+    if (f != NULL)
+        gfx_text(x + 24, ty, f->app->name, COL_ON_DARK_MUTED, FONT_UI);
+    int32_t sy = (UI_TOPBAR_H - gfx_line_height(FONT_SMALL)) / 2;
+    struct gfx_rect lo = wm_ui_item(napps), st = wm_ui_item(napps + 1);
+    gfx_round(lo, UI_RADIUS_SM, 0xFFFFFF, 22);
+    gfx_text(lo.x + 10, sy, "Log out", COL_ON_DARK, FONT_SMALL);
+    gfx_round(gfx_rect(st.x + 12, UI_TOPBAR_H / 2 - 4, 8, 8), 4, healthy ? COL_OK : COL_DANGER, 255);
+    gfx_text(st.x + 26, sy, status, COL_ON_DARK, FONT_SMALL);
+    gfx_text(st.x + st.w + 24, sy, right, COL_ON_DARK, FONT_SMALL);
+}
+
+static void draw_dock(void)
+{
+    struct gfx_rect d = dock_rect();
+    gfx_round(gfx_grow(d, 1), 21, 0xFFFFFF, 26);           /* a faint rim */
+    gfx_round(d, 20, COL_CHROME, 190);
     struct window *f = wm_focused();
     for (unsigned i = 0; i < napps; i++) {
-        bool on = f != NULL && f->app == apps[i];
-        button(wm_topbar_item(i), apps[i]->name, on ? COL_ACCENT : COL_BG, on ? COL_SURFACE : COL_TEXT);
+        struct gfx_rect s = wm_ui_item(i);
+        struct gfx_rect t = gfx_rect(s.x + (s.w - TILE) / 2, s.y + 2, TILE, TILE);
+        if (f != NULL && f->app == apps[i])
+            gfx_round(gfx_grow(t, 4), 15, 0xFFFFFF, 34);
+        gfx_round(t, 11, apps[i]->tile, 255);
+        if (apps[i]->icon != NULL)
+            apps[i]->icon(t);
+        bool running = wm_find(apps[i]) != NULL;
+        int32_t lw = gfx_text_width(apps[i]->name, FONT_SMALL);
+        gfx_text(s.x + (s.w - lw) / 2, t.y + TILE + 3, apps[i]->name,
+                 running ? COL_ON_DARK : COL_ON_DARK_MUTED, FONT_SMALL);
+        if (running)
+            gfx_round(gfx_rect(s.x + s.w / 2 - 2, d.y + d.h - 7, 4, 4), 2, COL_SAFFRON, 255);
     }
-    button(wm_topbar_item(napps), "Log out", COL_BG, COL_TEXT);
-    struct gfx_rect b = wm_topbar_item(napps + 1);
-    button(b, badge, healthy ? COL_OK : COL_DANGER, COL_SURFACE);
-    gfx_text(b.x + b.w + 16, 8, right, COL_TEXT, 1);
 }
 
 static void topbar_click(int32_t x, int32_t y)
 {
     for (unsigned i = 0; i < napps + 2; i++) {
-        if (!gfx_inside(wm_topbar_item(i), x, y))
+        if (!gfx_inside(wm_ui_item(i), x, y))
             continue;
         if (i < napps)
             wm_show(apps[i]);
@@ -309,25 +376,45 @@ static void topbar_click(int32_t x, int32_t y)
                 if (strcmp(apps[j]->name, "Health") == 0)
                     wm_show(apps[j]);
         wm_damage(gfx_rect(0, 0, back.w, UI_TOPBAR_H));
+        wm_damage(dock_rect());
         return;
     }
 }
 
 /* ---- drawing ------------------------------------------------------------- */
 
+static struct gfx_rect close_rect(const struct window *w)
+{
+    return gfx_rect(w->r.x + w->r.w - 28, w->r.y + 13, 14, 14);
+}
+
 static void draw_window(struct window *w, bool focused)
 {
     struct gfx_rect r = w->r, clip = gfx_get_clip();
-    if (gfx_empty(gfx_intersect(r, clip)))
+    if (gfx_empty(gfx_intersect(outer(w), clip)))
         return;
-    gfx_frame(r, focused ? COL_ACCENT : COL_BORDER);
-    struct gfx_rect bar = gfx_rect(r.x + 1, r.y + 1, r.w - 2, UI_TITLE_H - 1);
-    gfx_fill(bar, focused ? COL_ACCENT : COL_BORDER);
-    uint32_t tc = focused ? COL_SURFACE : COL_TEXT;
-    gfx_text(bar.x + UI_PAD, bar.y + 5, w->title, tc, 1);
-    gfx_text(r.x + r.w - CLOSE_W + 10, bar.y + 5, "x", tc, 1);
+    bool dark = w->app->dark;
+    /* The shadow's own shape is smaller than the window, so only its soft
+     * fade shows below it, never a solid band. */
+    if (focused)
+        gfx_shadow(gfx_grow(r, -10), UI_RADIUS, SHADOW, 12, 110);
+    else
+        gfx_shadow(gfx_grow(r, -8), UI_RADIUS, 20, 8, 60);
+    if (dark)
+        gfx_round(gfx_grow(r, 1), UI_RADIUS + 1, 0xFFFFFF, 30);
+    gfx_round(r, UI_RADIUS, dark ? COL_TERM_TITLE : COL_SURFACE, 255);
     struct gfx_rect body = wm_body(w);
-    gfx_fill(body, COL_SURFACE);
+    if (dark) {
+        gfx_round(body, UI_RADIUS, COL_TERM_BG, 255);
+        gfx_fill(gfx_rect(body.x, body.y, body.w, UI_RADIUS), COL_TERM_BG);
+    }
+    gfx_fill(gfx_rect(r.x, body.y - 1, r.w, 1), dark ? 0x232B36 : COL_LINE);
+    uint32_t tc = dark ? (focused ? COL_ON_DARK : COL_ON_DARK_MUTED) : (focused ? COL_TEXT : COL_MUTED);
+    int32_t tw = gfx_text_width(w->title, FONT_MEDIUM);
+    gfx_text(r.x + (r.w - tw) / 2, r.y + (UI_TITLE_H - gfx_line_height(FONT_MEDIUM)) / 2,
+             w->title, tc, FONT_MEDIUM);
+    struct gfx_rect c = close_rect(w);
+    gfx_round(c, 7, focused ? COL_DANGER : (dark ? 0x3A4452 : COL_LINE), 255);
     if (w->app->draw != NULL) {
         gfx_clip(gfx_intersect(clip, body));
         w->app->draw(w, body);
@@ -337,21 +424,21 @@ static void draw_window(struct window *w, bool focused)
 
 static struct gfx_rect cursor_rect(void)
 {
-    return gfx_rect(px, py, CURSOR_W, CURSOR_H);
+    return gfx_rect(px - 1, py - 1, CURSOR_W + 2, CURSOR_H + 2);
 }
 
-/* An arrow: a dark outline around a white inside. */
+/* An arrow: dark inside, light outline, so it shows on any colour. */
 static void draw_cursor(void)
 {
     for (int32_t i = 0; i < 16; i++) {
         int32_t w = i < 11 ? i + 1 : 11 - (i - 11) * 2;
         if (w > 0)
-            gfx_fill(gfx_rect(px, py + i, w, 1), COL_TEXT);
+            gfx_fill(gfx_rect(px, py + i, w, 1), 0xFFFFFF);
         if (w > 2 && i < 15)
-            gfx_fill(gfx_rect(px + 1, py + i, w - 2, 1), COL_SURFACE);
+            gfx_fill(gfx_rect(px + 1, py + i, w - 2, 1), 0x11151B);
     }
-    gfx_fill(gfx_rect(px + 4, py + 13, 3, 6), COL_TEXT);
-    gfx_fill(gfx_rect(px + 5, py + 13, 1, 5), COL_SURFACE);
+    gfx_fill(gfx_rect(px + 4, py + 13, 3, 6), 0xFFFFFF);
+    gfx_fill(gfx_rect(px + 5, py + 13, 1, 5), 0x11151B);
 }
 
 bool wm_compose(void)
@@ -360,19 +447,19 @@ bool wm_compose(void)
         return false;
     struct gfx_rect d = damage;
     damage = gfx_rect(0, 0, 0, 0);
+    gfx_copy(&back, &wall, d);
     gfx_target(&back);
     gfx_clip(d);
-    gfx_fill(d, COL_BG);
     if (backdrop != NULL)
         backdrop();
-    if (napps > 0)
-        gfx_text(16, back.h - 28, "F1-F5 open the apps   Ctrl+W closes a window   F12 shows a tour",
-                 COL_MUTED, 1);
     for (unsigned i = 0; i < nwin; i++)
         draw_window(order[i], i == nwin - 1);
-    if (napps > 0)
+    if (napps > 0) {
         draw_topbar();
-    draw_cursor();
+        draw_dock();
+    }
+    if (pointer_shown)
+        draw_cursor();
     if (screen != NULL)
         gfx_copy(screen, &back, d);
     stats.frames++;
@@ -411,6 +498,7 @@ void wm_mouse(int32_t x, int32_t y, uint8_t b)
         wm_damage(cursor_rect());
         px = x;
         py = y;
+        pointer_shown = true;
         wm_damage(cursor_rect());
         if (dragging != NULL)
             wm_move(dragging, x - drag_dx, y - drag_dy);
@@ -421,11 +509,11 @@ void wm_mouse(int32_t x, int32_t y, uint8_t b)
     buttons = b;
     if (!press)
         return;
-    if (y < UI_TOPBAR_H) {
+    struct window *w = window_at(x, y);
+    if (napps > 0 && (y < UI_TOPBAR_H || (w == NULL && gfx_inside(dock_rect(), x, y)))) {
         topbar_click(x, y);
         return;
     }
-    struct window *w = window_at(x, y);
     if (w == NULL)
         return;
     wm_focus(w);
@@ -454,18 +542,22 @@ void wm_tick(void)
 
 /* ---- widgets ------------------------------------------------------------- */
 
-int ui_buttons(struct gfx_rect body, const char *const *labels, unsigned n,
+int ui_buttons(struct gfx_rect body, const char *const *labels, unsigned n, int primary,
                bool draw, int32_t x, int32_t y)
 {
-    int32_t bx = body.x + UI_PAD;
+    int32_t bx = body.x + UI_PAD, by = body.y + 12;
     int hit = -1;
     for (unsigned i = 0; i < n; i++) {
-        struct gfx_rect r = gfx_rect(bx, body.y + UI_PAD, (int32_t)strlen(labels[i]) * GFX_CHAR_W + 16, 24);
-        if (draw)
-            button(r, labels[i], COL_ACCENT, COL_SURFACE);
+        struct gfx_rect r = gfx_rect(bx, by, gfx_text_width(labels[i], FONT_MEDIUM) + 28, 32);
+        if (draw) {
+            bool main = (int)i == primary;
+            gfx_round(r, UI_RADIUS_SM, main ? COL_PRIMARY : COL_SURFACE_2, 255);
+            gfx_text(r.x + 14, r.y + (r.h - gfx_line_height(FONT_MEDIUM)) / 2, labels[i],
+                     main ? COL_SURFACE : COL_TEXT, FONT_MEDIUM);
+        }
         if (gfx_inside(r, x, y))
             hit = (int)i;
-        bx += r.w + UI_PAD;
+        bx += r.w + 8;
     }
     return hit;
 }

@@ -19,6 +19,7 @@
 #include "percpu.h"
 #include "kprintf.h"
 #include "string.h"
+#include "font.h"
 
 #define CHECK(c, d) st_check((c), (d))
 
@@ -53,15 +54,39 @@ static void test_gfx(void)
     gfx_fill(gfx_rect(-100, -100, 50, 50), 0xFFFFFF);
     CHECK(gfx_get(&sa, 0, 0) == 0, "a rectangle off the surface draws nothing (and does not crash)");
     gfx_target(&sa);
-    int32_t w = gfx_text(0, 16, "H", 0xFF0000, 1);
-    CHECK(w == 8 && gfx_get(&sa, 0, 18) == 0xFF0000 && gfx_get(&sa, 3, 18) == 0,
-          "text: 'H' is 8 pixels wide, its stroke drawn, its middle gap left");
+    gfx_fill(gfx_rect(0, 0, 64, 32), 0x000000);
+    int32_t w = gfx_text(0, 0, "H", 0xFF0000, FONT_UI);
+    unsigned inked = 0, solid = 0, other = 0;
+    for (int32_t y = 0; y < 32; y++)
+        for (int32_t x = 0; x < 64; x++) {
+            uint32_t c = gfx_get(&sa, x, y);
+            inked += c != 0;
+            solid += c == 0xFF0000;
+            other += (c & 0x00FFFF) != 0;            /* only red may appear */
+        }
+    CHECK(font_get(FONT_UI) != NULL && w == gfx_text_width("H", FONT_UI) && w > 4 && solid >= 10
+          && inked > solid && other == 0,
+          "smooth text: 'H' has solid strokes and blended edges, in its own colour only");
+    CHECK(gfx_text(0, 0, " ", 0xFF0000, FONT_UI) > 0 && gfx_text_width("", FONT_UI) == 0
+          && gfx_text_width("MMM", FONT_MONO) == 3 * FONT_MONO_W,
+          "text widths: a space moves the pen, monospace cells are fixed");
+    gfx_fill(gfx_rect(0, 0, 64, 32), 0x000000);
+    gfx_round(gfx_rect(0, 0, 32, 32), 8, 0xFFFFFF, 255);
+    uint32_t edge = gfx_get(&sa, 1, 1), mid = gfx_get(&sa, 16, 16), near = gfx_get(&sa, 1, 3);   /* on the curve */
+    CHECK(edge == 0 && mid == 0xFFFFFF && near != 0 && near != 0xFFFFFF,
+          "rounded rectangle: the corner is cut, the inside solid, the edge blended");
+    gfx_fill(gfx_rect(0, 0, 64, 32), 0xFFFFFF);
+    gfx_shadow(gfx_rect(20, 8, 20, 10), 4, 8, 2, 120);
+    CHECK(gfx_get(&sa, 30, 12) == 0xFFFFFF && gfx_get(&sa, 30, 20) != 0xFFFFFF
+          && gfx_get(&sa, 30, 31) == 0xFFFFFF,
+          "shadow: under and around the rectangle, never inside it, fading out");
     struct gfx_rect u = gfx_union(gfx_rect(0, 0, 4, 4), gfx_rect(10, 10, 2, 2));
     struct gfx_rect i = gfx_intersect(gfx_rect(0, 0, 10, 10), gfx_rect(5, 5, 10, 10));
     CHECK(u.x == 0 && u.w == 12 && u.h == 12 && i.x == 5 && i.w == 5
           && gfx_empty(gfx_intersect(gfx_rect(0, 0, 2, 2), gfx_rect(5, 5, 2, 2))),
           "rectangle union and intersection");
     memset(b, 0, sizeof(b));
+    gfx_fill(gfx_rect(0, 0, 64, 32), 0x123456);
     gfx_copy(&sb, &sa, gfx_rect(8, 8, 8, 8));
     CHECK(gfx_get(&sb, 10, 10) == 0x123456 && gfx_get(&sb, 0, 18) == 0,
           "present copies only the damaged rectangle");
@@ -104,9 +129,10 @@ static void test_login(void)
     struct wm_stats s;
     wm_compose();
     wm_get_stats(&s);
-    struct gfx_rect bar = wm_topbar_item(0);
-    CHECK(s.frames > 0 && gfx_get(wm_back(), bar.x + 2, bar.y + 2) == COL_BG,
-          "the desktop is drawn with the app buttons on the top bar");
+    struct gfx_rect slot = wm_ui_item(0);
+    int32_t tx = slot.x + (slot.w - 44) / 2 + 6, ty = slot.y + 2 + 22;
+    CHECK(s.frames > 0 && gfx_get(wm_back(), tx, ty) == app_terminal.tile,
+          "the desktop is drawn with the apps in the dock");
 }
 
 static void test_windows(void)
@@ -115,7 +141,7 @@ static void test_windows(void)
     struct window *t = wm_open(&app_terminal, NULL);
     struct window *f = wm_open(&app_files, NULL);
     CHECK(t != NULL && f != NULL && wm_focused() == f, "two windows open; the newer one has the focus");
-    wm_move(f, 700, 400);
+    wm_move(f, 1000, 600);                 /* clear of the centred terminal */
     wm_focus(t);
     CHECK(wm_focused() == t, "focus moves to the window brought forward");
     /* Click the title bar of the Files window where the terminal does not
@@ -153,12 +179,12 @@ static void test_windows(void)
     wm_focus(f);
     click(close.x, close.y);
     CHECK(wm_find(&app_files) == NULL && wm_focused() == t, "the x closes a window; focus goes back");
-    struct gfx_rect item = wm_topbar_item(1);
+    struct gfx_rect item = wm_ui_item(1);
     click(item.x + 4, item.y + 4);
     f = wm_find(&app_files);
     click(item.x + 4, item.y + 4);
     CHECK(f != NULL && wm_focused() == f && wm_find(&app_files) == f,
-          "the top bar opens an app, and a second click does not open it twice");
+          "the dock opens an app, and a second click does not open it twice");
     wm_key(INPUT_KEY_F1 + 2);
     CHECK(wm_focused() != NULL && wm_focused()->app == &app_monitor, "F3 opens the Monitor");
     wm_key(23);
@@ -250,7 +276,9 @@ static void test_monitor_health(void)
     CHECK(m != NULL && sane, "the monitor samples every CPU (busy between 0 and 100%)");
     wm_compose();
     struct gfx_rect body = wm_body(m);
-    CHECK(gfx_get(wm_back(), body.x + UI_PAD + 96, body.y + UI_BAR_H + 6) != COL_SURFACE,
+    CHECK(gfx_get(wm_back(), body.x + UI_PAD + 152, body.y + UI_BAR_H + 13) == COL_LINE
+          || gfx_get(wm_back(), body.x + UI_PAD + 152, body.y + UI_BAR_H + 13) == COL_TEAL
+          || gfx_get(wm_back(), body.x + UI_PAD + 152, body.y + UI_BAR_H + 13) == COL_PRIMARY,
           "CPU 0's bar is drawn");
     wm_close(m);
 

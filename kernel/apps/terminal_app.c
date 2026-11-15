@@ -49,12 +49,11 @@ static void term_close(struct window *w)
 
 static void term_draw(struct window *w, struct gfx_rect body)
 {
-    struct term *t = w->st;
-    gfx_fill(body, COL_TERM_BG);
-    textbuf_draw(&t->tb, body.x + UI_PAD, body.y + UI_PAD, COL_TERM_TEXT);
-    gfx_fill(gfx_rect(body.x + UI_PAD + (int32_t)t->tb.col * GFX_CHAR_W,
-                      body.y + UI_PAD + (int32_t)t->tb.row * GFX_CHAR_H + GFX_CHAR_H - 3,
-                      GFX_CHAR_W, 2), COL_SAFFRON);
+    struct term *t = w->st;              /* the window manager paints the dark body */
+    gfx_fill(gfx_rect(body.x + UI_PAD + (int32_t)t->tb.col * FONT_MONO_W,
+                      body.y + 12 + (int32_t)t->tb.row * FONT_MONO_H + 1,
+                      FONT_MONO_W, FONT_MONO_H - 2), COL_SAFFRON);     /* block caret */
+    textbuf_draw(&t->tb, body.x + UI_PAD, body.y + 12, COL_TERM_TEXT);
 }
 
 static void term_key(struct window *w, uint16_t key)
@@ -78,8 +77,11 @@ static void term_key(struct window *w, uint16_t key)
 
 const struct app app_terminal = {
     .name = "Terminal",
-    .w = TERM_COLS * GFX_CHAR_W + 2 * UI_PAD,
-    .h = TERM_ROWS * GFX_CHAR_H + 2 * UI_PAD,
+    .w = TERM_COLS * FONT_MONO_W + 2 * UI_PAD,
+    .h = TERM_ROWS * FONT_MONO_H + 24,
+    .dark = true,
+    .tile = 0x1A212B,
+    .icon = icon_terminal,
     .open = term_open,
     .close = term_close,
     .draw = term_draw,
