@@ -513,6 +513,15 @@ static void test_shell_more(void)
     CHECK(run(sh, "tree", "+-- d/") && strstr(out_buf, "|   +-- c.txt") != NULL, "tree shows folders inside folders");
     CHECK(run(sh, "cp nothing.txt x", "no such file or folder"), "cp of a missing file says so");
     CHECK(run(sh, "df", "BharatOS files"), "df shows how full the disk is");
+    CHECK(run(sh, "ls /", "\x1b[94mmedia/"), "ls marks folders with a colour code");
+    run(sh, "ls / > l.txt", NULL);
+    char lbuf[512];
+    size_t ln = 0;
+    lbuf[0] = '\0';
+    if (fs_read_file("/home/tester/l.txt", lbuf, sizeof(lbuf) - 1, &ln) == FS_OK)
+        lbuf[ln] = '\0';
+    CHECK(strstr(lbuf, "media/") != NULL && strchr(lbuf, 0x1b) == NULL, "ls into a file has no colour codes");
+    run(sh, "rm l.txt", NULL);
     char done[LE_MAX];
     CHECK(shell_complete(sh, "tre", done, sizeof(done)) && strcmp(done, "tree ") == 0,
           "Tab completes a command name");
@@ -596,6 +605,59 @@ static void test_login_languages(void)
     login_set_language(LOGIN_HINDI);
 }
 
+/* ---- terminal scrollback and colours ------------------------------------------- */
+
+static void test_terminal_more(void)
+{
+    st_section("Terminal: scrollback and colours");
+    struct textbuf tb;
+    if (!CHECK(textbuf_init(&tb, 20, 3), "a text buffer with scrollback"))
+        return;
+    textbuf_puts(&tb, "\x1b[34mblue\x1b[0m plain \x1b[1;32mg\x1b[45mh\n");
+    CHECK(textbuf_shown_colour(&tb, 0, 0) == 5 && textbuf_shown_colour(&tb, 0, 5) == 0,
+          "colour codes colour the text that follows, 0 resets");
+    CHECK(textbuf_shown_colour(&tb, 0, 11) == 3 && textbuf_shown_colour(&tb, 0, 12) == 3,
+          "ESC [1;32m works and unknown codes change nothing");
+    textbuf_clear(&tb);
+    char line[16];
+    for (unsigned i = 0; i < 10; i++) {
+        ksnprintf(line, sizeof(line), "line %u\n", i);
+        textbuf_puts(&tb, line);
+    }
+    CHECK(memcmp(textbuf_row(&tb, 0), "line 8", 6) == 0 && tb.hist == 8, "lines that scroll off are kept");
+    textbuf_scroll(&tb, 100);
+    CHECK(tb.view == 8 && memcmp(textbuf_shown_row(&tb, 0), "line 0", 6) == 0,
+          "scrolling back shows the oldest line and stops there");
+    textbuf_scroll(&tb, -100);
+    CHECK(tb.view == 0 && memcmp(textbuf_shown_row(&tb, 0), "line 8", 6) == 0, "scrolling forward stops at the live rows");
+    for (unsigned i = 0; i < 300; i++)
+        textbuf_puts(&tb, "more\n");
+    CHECK(tb.hist == TEXTBUF_BACK, "the scrollback keeps at most its limit of lines");
+    textbuf_free(&tb);
+
+    struct window *w = wm_open(&app_terminal, NULL);
+    struct textbuf *t = app_text(w);
+    if (!CHECK(t != NULL, "a Terminal opens"))
+        return;
+    type("ls /\n");
+    bool blue = false;
+    for (unsigned r = 0; r < t->rows; r++) {
+        const char *row = textbuf_row(t, r);
+        for (unsigned c = 0; c + 6 <= t->cols; c++)
+            if (memcmp(row + c, "media/", 6) == 0)
+                blue = textbuf_shown_colour(t, r, c) == 13;
+    }
+    CHECK(blue, "ls shows folders in colour in the Terminal");
+    type("help\n");
+    desktop_key(INPUT_KEY_PAGE_UP);
+    CHECK(t->view == t->rows - 2 && memcmp(textbuf_shown_row(t, 0), textbuf_row(t, 0), t->cols) != 0,
+          "Page Up looks back through the scrollback");
+    wm_compose();
+    desktop_key('x');
+    CHECK(t->view == 0, "typing goes back to the live lines");
+    wm_close(w);
+}
+
 /* ---- screenshots ------------------------------------------------------------- */
 
 static void test_screenshot(void)
@@ -667,6 +729,7 @@ bool apps_run_tests(void)
         test_browser();
         test_files_places();
         test_screenshot();
+        test_terminal_more();
     }
     wm_close_all();
     desktop_logout();

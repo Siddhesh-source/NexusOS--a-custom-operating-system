@@ -120,12 +120,20 @@ static int cmd_ls(struct shell *sh, int argc, char **argv)
     struct fs_dirent e;
     unsigned i = 0;
     while (fs_list(path, i, &e) == FS_OK) {
+        /* Colours on screen (not in a file): folders blue, scripts green,
+         * videos magenta, web pages cyan. */
+        const char *dot = strrchr(e.name, '.'), *on = "", *off = "";
+        if (sh->cap == NULL) {
+            on = e.type == FS_DIR ? "\x1b[94m" : dot == NULL ? "" : strcmp(dot, ".sh") == 0 ? "\x1b[92m"
+                 : strcmp(dot, ".bvid") == 0 ? "\x1b[95m" : strcmp(dot, ".html") == 0 ? "\x1b[96m" : "";
+            off = on[0] != '\0' ? "\x1b[0m" : "";
+        }
         if (e.type == FS_DIR) {
             char name[FS_NAME_MAX + 1];
             ksnprintf(name, sizeof(name), "%s/", e.name);
-            P("%-28s folder, %lu item%s\n", name, e.size, e.size == 1 ? "" : "s");
+            P("%s%-28s%s folder, %lu item%s\n", on, name, off, e.size, e.size == 1 ? "" : "s");
         } else
-            P("%-28s %lu bytes\n", e.name, e.size);
+            P("%s%-28s%s %lu bytes\n", on, e.name, off, e.size);
         i++;
     }
     if (i == 0)
