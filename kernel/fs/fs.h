@@ -106,6 +106,10 @@ fs_status_t fs_seek(int fd, uint64_t pos);
 fs_status_t fs_create(const char *path);       /* empty file */
 fs_status_t fs_mkdir(const char *path);
 fs_status_t fs_unlink(const char *path);       /* a file or an empty folder */
+/* Rename or move a file or folder (with everything in it). EXISTS if `to`
+ * is taken, BUSY for an open file or the root, INVALID for a folder moved
+ * inside itself. */
+fs_status_t fs_rename(const char *from, const char *to);
 fs_status_t fs_stat(const char *path, struct fs_stat *out);
 
 /* Entry number `index` (0, 1, ...) of a folder, in name order; NOT_FOUND

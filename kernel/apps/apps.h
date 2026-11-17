@@ -53,6 +53,8 @@ struct textbuf *app_text(struct window *w);
 bool files_select(struct window *w, const char *name);
 const char *files_selected(struct window *w);
 const char *files_folder(struct window *w);
+/* Files: its message line ("Pasted notes-copy.txt.", ...). */
+const char *files_message(struct window *w);
 
 /* Text editor: its text (0-terminated) and whether it has unsaved changes. */
 const char *editor_text(struct window *w, bool *unsaved);

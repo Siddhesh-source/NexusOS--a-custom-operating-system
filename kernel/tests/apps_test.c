@@ -375,6 +375,73 @@ static void test_browser(void)
     fs_unlink("/home/tester/second.html");
 }
 
+static void test_files_copy_rename(void)
+{
+    st_section("Files: copy, paste and rename");
+    struct fs_stat st;
+    char buf[32];
+    size_t n = 0;
+    fs_mkdir("/home/tester/cp");
+    fs_write_file("/home/tester/cp/notes.txt", "hello notes", 11, false);
+    CHECK(fs_rename("/home/tester/cp/notes.txt", "/home/tester/cp/n2.txt") == FS_OK
+          && fs_stat("/home/tester/cp/n2.txt", &st) == FS_OK && st.size == 11
+          && fs_stat("/home/tester/cp/notes.txt", &st) == FS_ERR_NOT_FOUND, "fs_rename renames a file");
+    fs_write_file("/home/tester/cp/other.txt", "x", 1, false);
+    CHECK(fs_rename("/home/tester/cp/n2.txt", "/home/tester/cp/other.txt") == FS_ERR_EXISTS
+          && fs_rename("/home/tester/cp", "/home/tester/cp/inside") == FS_ERR_INVALID
+          && fs_rename("/home/tester/nothing", "/home/tester/x") == FS_ERR_NOT_FOUND && fs_rename("/", "/x") == FS_ERR_BUSY,
+          "fs_rename refuses a taken name, a folder into itself, a missing file and the root");
+    fs_rename("/home/tester/cp/n2.txt", "/home/tester/cp/notes.txt");
+    fs_unlink("/home/tester/cp/other.txt");
+    struct window *f = wm_open(&app_files, "/home/tester/cp");
+    if (!CHECK(f != NULL, "Files opens a folder"))
+        return;
+    desktop_key(22);                                    /* Ctrl+V with nothing copied */
+    CHECK(strstr(files_message(f), "Nothing to paste") != NULL,
+          "Paste with nothing copied says so");
+    fs_unlink("/home/tester/cp/notes-copy.txt");
+    files_select(f, "notes.txt");
+    desktop_key(3);                                     /* Ctrl+C */
+    desktop_key(22);                                    /* Ctrl+V */
+    buf[0] = '\0';
+    if (fs_read_file("/home/tester/cp/notes-copy.txt", buf, sizeof(buf) - 1, &n) == FS_OK)
+        buf[n] = '\0';
+    CHECK(strcmp(buf, "hello notes") == 0 && strstr(files_message(f), "Pasted notes-copy.txt") != NULL,
+          "Copy and Paste in the same folder makes notes-copy.txt");
+    desktop_key(22);
+    CHECK(fs_stat("/home/tester/cp/notes-copy2.txt", &st) == FS_OK, "pasting again makes notes-copy2.txt");
+    desktop_key('\b');                                  /* up to /home/tester */
+    desktop_key(22);
+    CHECK(fs_stat("/home/tester/notes.txt", &st) == FS_OK && st.size == 11, "Paste in another folder keeps the name");
+    fs_unlink("/home/tester/notes.txt");
+    files_select(f, "cp");
+    desktop_key(3);
+    CHECK(strstr(files_message(f), "folders cannot be copied") != NULL, "copying a folder is refused with a reason");
+    desktop_key('r');
+    for (unsigned i = 0; i < 2; i++)
+        desktop_key('\b');
+    type("docs2");                                      /* "cp" -> "docs2" */
+    desktop_key('\n');
+    CHECK(fs_stat("/home/tester/docs2/notes.txt", &st) == FS_OK && fs_stat("/home/tester/cp", &st) != FS_OK
+          && strstr(files_message(f), "Renamed cp to docs2") != NULL, "Rename renames a folder with its files");
+    files_select(f, "docs2");
+    desktop_key('r');
+    for (unsigned i = 0; i < 5; i++)
+        desktop_key('\b');
+    desktop_key('\n');
+    CHECK(strstr(files_message(f), "Cannot rename") != NULL && fs_stat("/home/tester/docs2", &st) == FS_OK,
+          "an empty new name is refused and nothing changes");
+    wm_compose();
+    wm_close(f);
+    const char *left[] = { "notes.txt", "notes-copy.txt", "notes-copy2.txt" };
+    char p[FS_PATH_MAX];
+    for (unsigned i = 0; i < 3; i++) {
+        ksnprintf(p, sizeof(p), "/home/tester/docs2/%s", left[i]);
+        fs_unlink(p);
+    }
+    fs_unlink("/home/tester/docs2");
+}
+
 static void test_files_places(void)
 {
     st_section("Files: places and disk");
@@ -397,6 +464,7 @@ static void test_files_places(void)
     CHECK(strcmp(files_folder(f), "/") == 0, "Up closes the folder and goes to the one holding it");
     wm_compose();
     wm_close(f);
+    test_files_copy_rename();
 }
 
 /* ---- shell additions ------------------------------------------------------------ */
