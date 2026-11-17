@@ -40,6 +40,9 @@ void clock_init_cpu(void);
 
 bool clock_ready(void);
 uint64_t clock_now_ns(void);
+/* Time since the machine was switched on (the CPU's time-stamp counter
+ * starts at 0 then), so it includes the firmware and the bootloader. */
+uint64_t clock_boot_ns(void);
 
 /* Fire once at `deadline_ns` (clock_now_ns time) on the calling CPU. A
  * deadline in the past fires almost at once. Replaces any earlier alarm

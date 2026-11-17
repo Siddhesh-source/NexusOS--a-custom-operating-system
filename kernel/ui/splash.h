@@ -27,6 +27,11 @@ void splash_start(void *addr, uint64_t width, uint64_t height, uint64_t pitch,
 /* One boot step finished; `what` names the next one ("Checking memory"). */
 void splash_step(const char *what);
 
+/* The last step: "Ready: booted in 14.2 s", from power-on to here, with
+ * every self-check. Remembered for the login screen. */
+void splash_finish(uint64_t boot_ms, unsigned checks);
+uint64_t splash_boot_ms(void);
+
 /* Steps done so far (for self-tests). */
 unsigned splash_steps_done(void);
 

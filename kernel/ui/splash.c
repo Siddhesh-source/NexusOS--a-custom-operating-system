@@ -3,11 +3,13 @@
 #include "fbcon.h"
 #include "serial.h"
 #include "string.h"
+#include "kprintf.h"
 
 static struct gfx_surface screen;
 static bool have_screen, shown;
 static unsigned done;
 static int32_t area_h;              /* splash height; the boot log is below */
+static uint64_t boot_ms;
 
 struct gfx_surface *splash_screen(void)
 {
@@ -65,6 +67,19 @@ void splash_start(void *addr, uint64_t width, uint64_t height, uint64_t pitch,
     gfx_text((screen.w - gfx_text_width(sub, FONT_UI)) / 2, ty + 76, sub, COL_ON_DARK_MUTED, FONT_UI);
     shown = true;
     draw_progress("Starting");
+}
+
+uint64_t splash_boot_ms(void)
+{
+    return boot_ms;
+}
+
+void splash_finish(uint64_t ms, unsigned checks)
+{
+    char s[80];
+    boot_ms = ms;
+    ksnprintf(s, sizeof(s), "Ready: booted in %lu.%lu s, %u self-checks passed", ms / 1000, (ms / 100) % 10, checks);
+    splash_step(s);
 }
 
 void splash_step(const char *what)

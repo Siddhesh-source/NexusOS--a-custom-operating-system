@@ -86,6 +86,8 @@ static void test_net(void)
     CHECK(http_get("http://:80/", page, sizeof(page), &len, &status, NULL) == NET_ERR_INVALID
           && http_get("http://host:99999/", page, sizeof(page), &len, &status, NULL) == NET_ERR_INVALID,
           "a broken web address is refused");
+    CHECK(clock_boot_ns() > clock_now_ns() && clock_boot_ns() > 0,
+          "time since power-on is counted (it is longer than the kernel's own clock)");
     test_dhcp_parse();
     if (!net_up()) {
         kprintf("[test] no network card: the live network checks are skipped\n");

@@ -165,6 +165,19 @@ def check_screenshot(shot: Path) -> bool:
     return ok
 
 
+def check_boot_time(text: str, measured: float) -> bool:
+    """The kernel says how long it took from power-on ("[boot] Booted in
+    14.2 s"); it must be there, above zero, and no more than what this
+    harness measured from starting QEMU (plus a little for rounding)."""
+    import re
+    m = re.search(r"\[boot\] Booted in (\d+)\.(\d) s", text)
+    value = float(f"{m.group(1)}.{m.group(2)}") if m else 0.0
+    ok = m is not None and 0 < value <= measured + 2
+    print(f"[{'PASS' if ok else 'FAIL'}] boot time shown on the splash: {value} s "
+          f"(harness measured {measured:.1f} s)")
+    return ok
+
+
 def boot_and_watch(image: Path, required: List[str], forbidden: List[str],
                    timeout: int, session: List[tuple] | None = None) -> tuple[bool, str, float]:
     """Boot `image` until every `required` marker is seen, a `forbidden`
@@ -281,6 +294,8 @@ def run_boot_test(image: Path, timeout: int = 180) -> int:
         srv.shutdown()
     print("=" * 60)
     if success and not check_screenshot(shot):
+        return 1
+    if success and not check_boot_time(full, seconds):
         return 1
     if success:
         from budgets import check_budgets

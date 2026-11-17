@@ -366,7 +366,16 @@ void kernel_main(void)
     if (!net_init())
         kprintf("[net] no network card found; the network is off\n");
     bool apps_ok = apps_run_tests();
-    splash_step("Ready");
+    {
+        /* How long from power-on until every check passed: on the splash,
+         * the login screen and the log (the boot test reads it). */
+        unsigned passed, failed;
+        selftest_totals(&passed, &failed);
+        uint64_t ms = clock_boot_ns() / 1000000;
+        kprintf("[boot] Booted in %lu.%lu s from power-on, %u self-checks run.\n", ms / 1000, (ms / 100) % 10,
+                passed + failed);
+        splash_finish(ms, passed);
+    }
 
     serial_puts("\n[ok] Kernel started successfully.\n");
     if (mm_ok)

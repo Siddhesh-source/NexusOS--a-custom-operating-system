@@ -153,6 +153,11 @@ void login_draw(void)
     else
         centred_lang(cy + 84, "Press Enter to sign in", PHRASE_HI_ENTER, PHRASE_MR_ENTER, COL_ON_DARK_MUTED);
     draw_languages(cy + 124);
+    if (splash_boot_ms() > 0) {
+        char t[48];
+        ksnprintf(t, sizeof(t), "Started in %lu.%lu s", splash_boot_ms() / 1000, (splash_boot_ms() / 100) % 10);
+        centred(b->h - 40, t, COL_ON_DARK_MUTED, FONT_SMALL);
+    }
 }
 
 static void enter_desktop(void)
