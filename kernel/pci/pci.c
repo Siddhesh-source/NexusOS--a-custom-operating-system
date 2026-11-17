@@ -16,6 +16,9 @@ static struct pci_device devices[PCI_MAX_DEVICES];
 static unsigned device_count;
 static bool use_ecam;
 static unsigned skipped;           /* functions found beyond the table size */
+/* The address and data ports are one shared pair: reads and writes keep
+ * their two accesses together, even against other CPUs. */
+static struct spinlock pci_lock = SPINLOCK_INIT(LOCK_CLASS_PCI);
 
 const char *pci_access_method(void)
 {
@@ -49,11 +52,31 @@ uint32_t pci_config_read32(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t offset)
     }
     /* The address and data ports are one shared pair: keep the two
      * accesses together, even against other CPUs. */
-    static struct spinlock pci_lock = SPINLOCK_INIT(LOCK_CLASS_PCI);
     SPIN_GUARD(&pci_lock);
     outl(PCI_CONFIG_ADDRESS, (1u << 31) | ((uint32_t)bus << 16) | ((uint32_t)dev << 11)
                              | ((uint32_t)fn << 8) | offset);
     return inl(PCI_CONFIG_DATA);
+}
+
+void pci_config_write32(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t offset, uint32_t v)
+{
+    if (dev >= 32 || fn >= 8 || (offset & 3))
+        return;
+    const struct acpi_info *a = acpi_get();
+    if (use_ecam) {
+        if (bus < a->ecam_bus_start || bus > a->ecam_bus_end)
+            return;
+        uint64_t phys = a->ecam_phys + (((uint64_t)(bus - a->ecam_bus_start) << 20)
+                                        | ((uint64_t)dev << 15) | ((uint64_t)fn << 12));
+        volatile uint32_t *cfg = vmm_map_phys(phys, 4096, VMM_WRITE | VMM_NOCACHE);
+        if (cfg != NULL)
+            cfg[offset / 4] = v;
+        return;
+    }
+    SPIN_GUARD(&pci_lock);
+    outl(PCI_CONFIG_ADDRESS, (1u << 31) | ((uint32_t)bus << 16) | ((uint32_t)dev << 11)
+                             | ((uint32_t)fn << 8) | offset);
+    outl(PCI_CONFIG_DATA, v);
 }
 
 static void record(uint8_t bus, uint8_t dev, uint8_t fn, uint32_t id)

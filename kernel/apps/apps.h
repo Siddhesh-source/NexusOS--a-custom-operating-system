@@ -9,6 +9,9 @@
  *   Monitor         live load of every CPU, threads, memory
  *   Health          self-check results, the lock-order and crash demos
  *   About           what BharatOS is and how it is built
+ *   Code            a code editor: explorer, line numbers, colours, Run
+ *   Player          plays .bvid videos (the bundled Big Buck Bunny clip)
+ *   Browser         web pages over HTTP, and local HTML files
  *   Text editor     opened from Files (or with a path)
  *
  * V1: apps are code inside the kernel, run by the desktop thread, using
@@ -22,9 +25,9 @@
 #include "textbuf.h"
 
 extern const struct app app_terminal, app_files, app_monitor, app_health,
-                        app_about, app_editor;
+                        app_about, app_editor, app_code, app_player, app_browser;
 
-/* The apps on the top bar, in order (F1..F5). */
+/* The apps in the dock, in order (F1..F8). */
 extern const struct app *const desktop_apps[];
 extern const unsigned desktop_app_count;
 
@@ -34,6 +37,13 @@ void icon_files(struct gfx_rect t);
 void icon_monitor(struct gfx_rect t);
 void icon_health(struct gfx_rect t);
 void icon_about(struct gfx_rect t);
+void icon_code(struct gfx_rect t);
+void icon_player(struct gfx_rect t);
+void icon_browser(struct gfx_rect t);
+
+/* The app that opens a file, picked by its name (.bvid: Player, .html:
+ * Browser, .c .h .py .sh .md: Code, anything else: Text editor). */
+const struct app *app_for_file(const char *path);
 
 /* The text a Terminal, Health or About window shows; NULL for others. */
 struct textbuf *app_text(struct window *w);
@@ -46,6 +56,23 @@ const char *files_folder(struct window *w);
 
 /* Text editor: its text (0-terminated) and whether it has unsaved changes. */
 const char *editor_text(struct window *w, bool *unsaved);
+
+/* Code: its text, whether it is unsaved, and the Run output. */
+const char *code_text(struct window *w, bool *unsaved, struct textbuf **out);
+
+/* Player: a .bvid file's header is sound; the frame being shown, frames
+ * drawn so far and whether it is playing. */
+bool player_parse(const uint8_t *d, size_t size, uint16_t *w, uint16_t *h, uint16_t *fps,
+                  uint16_t *frames);
+unsigned player_frame(struct window *w, unsigned *shown, bool *playing);
+
+/* Browser: whether the page shows `text`; its address and link count;
+ * follow link `i`; go to an address; go back. */
+bool browser_page_has(struct window *w, const char *text);
+const char *browser_url(struct window *w, unsigned *links);
+bool browser_follow(struct window *w, unsigned i);
+void browser_go(struct window *w, const char *url);
+void browser_back(struct window *w);
 
 /* Monitor: busy % of CPU `cpu` over the last second. */
 unsigned monitor_busy(struct window *w, unsigned cpu);

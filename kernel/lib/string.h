@@ -18,5 +18,7 @@ size_t strlcpy(char *dst, const char *src, size_t size);
 char *strchr(const char *s, int c);
 char *strrchr(const char *s, int c);           /* last c, or NULL */
 char *strstr(const char *hay, const char *needle);
+/* Like strncmp, but A and a count as the same letter. */
+int strncasecmp(const char *a, const char *b, size_t n);
 
 #endif /* BHARAT_STRING_H */

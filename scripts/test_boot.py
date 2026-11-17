@@ -27,6 +27,7 @@ REQUIRED = [
     "[ok] Phase 10 files in memory verified.",
     "[ok] Phase 10 login and shell verified.",
     "[ok] Phase 11 desktop verified.",
+    "[ok] Network and apps verified.",
 ]
 
 # CPUs QEMU gives the kernel (build.py --smp sets this).
@@ -102,7 +103,7 @@ def cmd_for(image: Path) -> List[str]:
     if not qemu:
         print("[ERROR] qemu-system-x86_64 not found", file=sys.stderr)
         return []
-    return [qemu, "-m", "512M", "-smp", str(QEMU_SMP), "-accel", f"tcg,thread={QEMU_THREADS}",
+    return [qemu, "-m", "2G", "-smp", str(QEMU_SMP), "-nic", "user,model=e1000", "-accel", f"tcg,thread={QEMU_THREADS}",
             "-drive", f"file={image},format=raw,media=disk,if=ide",
             "-nographic", "-no-reboot", "-no-shutdown"]
 
@@ -118,6 +119,10 @@ def cmd_for(image: Path) -> List[str]:
 # prints [FAIL] lines if anything is wrong), then `screendump` saves the
 # screen to a file that is checked afterwards (see check_screenshot).
 PROMPT = "tester@bharat:~$ "
+# A tiny web server on the PC (see web_server); QEMU's network shows the
+# PC to BharatOS as 10.0.2.2, so `fetch` there crosses the real TCP stack.
+WEB_PORT = 18080
+WEB_TEXT = "BharatOS fetched this page over its own TCP/IP stack."
 SCREENSHOT = "desktop.ppm"     # written next to the disk image
 
 
@@ -128,6 +133,8 @@ def session(shot: Path) -> List[tuple]:
         (PROMPT, "echo typed at the prompt > t.txt\n"),
         (PROMPT, "cat t.txt\n"),
         ("typed at the prompt", None),
+        (PROMPT, f"fetch http://10.0.2.2:{WEB_PORT}/net-test.txt\n"),
+        ("its own TCP/IP stack", None),
         (PROMPT, mon([f"sendkey {k}" for k in "tester"] + ["sendkey ret"])),
         ("[desktop] Desktop ready for tester.", mon(["sendkey shift-f12"])),
         ("[tour] Demo finished (0 checks failed).",
@@ -251,10 +258,27 @@ def boot_and_watch(image: Path, required: List[str], forbidden: List[str],
     return success, text.replace("\r", ""), boot_seconds or time.time() - started
 
 
+def web_server(folder: Path):
+    """Serve `folder` on 127.0.0.1:WEB_PORT in a background thread."""
+    import functools
+    import http.server
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "net-test.txt").write_text(WEB_TEXT + "\n")
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(folder))
+    handler.log_message = lambda *a, **k: None
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", WEB_PORT), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
 def run_boot_test(image: Path, timeout: int = 180) -> int:
     shot = image.parent / SCREENSHOT
     shot.unlink(missing_ok=True)
-    success, full, seconds = boot_and_watch(image, REQUIRED, FORBIDDEN, timeout, session(shot))
+    srv = web_server(image.parent / "www-test")
+    try:
+        success, full, seconds = boot_and_watch(image, REQUIRED, FORBIDDEN, timeout, session(shot))
+    finally:
+        srv.shutdown()
     print("=" * 60)
     if success and not check_screenshot(shot):
         return 1
@@ -272,6 +296,8 @@ def run_boot_test(image: Path, timeout: int = 180) -> int:
         print(f"[PASS] Phase 9 multi-core tests passed ({QEMU_SMP} CPUs).")
         print("[PASS] Phase 10 input, files, login and shell tests passed.")
         print("[PASS] Phase 11 desktop tests passed.")
+        print("[PASS] Network (e1000, ARP, ping, TCP, HTTP), Code, Player and Browser tests passed.")
+        print("[PASS] A page served by the PC was fetched inside BharatOS over TCP.")
         print("[PASS] Keys typed over serial reached the shell; PS/2 keys logged in to the desktop.")
         print("[PASS] The quick desktop tour ran start to finish with every check passing.")
         return 0

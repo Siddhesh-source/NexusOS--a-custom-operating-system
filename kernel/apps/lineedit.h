@@ -10,6 +10,8 @@
  *   Up / Down              earlier / later lines from the history
  *   Ctrl+C                 abandons the line
  *   Ctrl+U                 clears the line
+ *   Tab                    completes a command or file name (when the
+ *                          owner set a `complete` function)
  *
  * Echo goes through an output function, so the same editor works on the
  * text console, in a desktop window (Phase 11) and in self-tests. In
@@ -39,6 +41,10 @@ struct lineedit {
     char draft[LE_MAX];           /* what was typed before browsing */
     le_output_t out;
     void *ctx;
+    /* Tab: fills `out` with the completed line; false if nothing to add.
+     * NULL: Tab types a space. */
+    bool (*complete)(void *cctx, const char *line, char *out, size_t cap);
+    void *cctx;
 };
 
 enum le_result {

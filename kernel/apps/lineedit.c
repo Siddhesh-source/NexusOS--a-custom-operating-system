@@ -81,7 +81,14 @@ enum le_result le_key(struct lineedit *le, uint16_t key)
         replace_line(le, le->browse < 0 ? le->draft : history_at(le, (unsigned)le->browse));
         return LE_MORE;
     case '\t':
-        key = ' ';                          /* no completion yet: a space */
+        if (le->complete != NULL && !le->secret) {
+            char done[LE_MAX];
+            le->buf[le->len] = '\0';
+            if (le->complete(le->cctx, le->buf, done, sizeof(done)))
+                replace_line(le, done);
+            return LE_MORE;
+        }
+        key = ' ';                          /* no completion: a space */
         break;
     }
     if (key < 0x20 || key >= 0x7F)

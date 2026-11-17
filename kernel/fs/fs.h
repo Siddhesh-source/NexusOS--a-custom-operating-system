@@ -34,8 +34,8 @@
 
 #define FS_NAME_MAX    32          /* including the final 0 */
 #define FS_PATH_MAX    256         /* including the final 0 */
-#define FS_FILE_MAX    (256 * 1024)
-#define FS_TOTAL_MAX   (8 * 1024 * 1024)
+#define FS_FILE_MAX    (4 * 1024 * 1024)
+#define FS_TOTAL_MAX   (32 * 1024 * 1024)
 #define FS_MAX_NODES   1024
 #define FS_MAX_OPEN    32
 

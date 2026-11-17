@@ -13,6 +13,7 @@
 #include "selftest.h"
 #include "input.h"
 #include "cpu.h"
+#include "net.h"
 #include "kprintf.h"
 #include "string.h"
 #include <stdarg.h>
@@ -217,6 +218,353 @@ static int cmd_rm(struct shell *sh, int argc, char **argv)
         }
     }
     return path_cmd(sh, argc, argv, fs_unlink, false);
+}
+
+/* ---- more file commands ------------------------------------------------------ */
+
+static void tree_walk(struct shell *sh, const char *path, unsigned depth, unsigned *files, unsigned *dirs)
+{
+    struct fs_dirent e;
+    for (unsigned i = 0; fs_list(path, i, &e) == FS_OK; i++) {
+        for (unsigned d = 0; d < depth; d++)
+            shell_write(sh, "|   ", 4);
+        if (e.type == FS_DIR) {
+            P("+-- %s/\n", e.name);
+            (*dirs)++;
+            char child[FS_PATH_MAX];
+            if (depth < 6 && fs_path_resolve(path, e.name, child, sizeof(child)) == FS_OK)
+                tree_walk(sh, child, depth + 1, files, dirs);
+        } else {
+            P("+-- %s  (%lu bytes)\n", e.name, e.size);
+            (*files)++;
+        }
+    }
+}
+
+static int cmd_tree(struct shell *sh, int argc, char **argv)
+{
+    char path[FS_PATH_MAX];
+    if (!resolve(sh, argc > 1 ? argv[1] : ".", path))
+        return 1;
+    struct fs_stat st;
+    fs_status_t r = fs_stat(path, &st);
+    if (r != FS_OK || st.type != FS_DIR)
+        return fail(sh, path, r != FS_OK ? r : FS_ERR_NOT_DIR);
+    P("%s\n", path);
+    unsigned files = 0, dirs = 0;
+    tree_walk(sh, path, 0, &files, &dirs);
+    P("%u folder%s, %u file%s\n", dirs, dirs == 1 ? "" : "s", files, files == 1 ? "" : "s");
+    return 0;
+}
+
+/* Copy one file; if `dst` is a folder, into it under the same name. */
+static int copy_file(struct shell *sh, const char *src_arg, const char *dst_arg)
+{
+    char src[FS_PATH_MAX], dst[FS_PATH_MAX];
+    if (!resolve(sh, src_arg, src) || !resolve(sh, dst_arg, dst))
+        return 1;
+    struct fs_stat st;
+    fs_status_t r = fs_stat(src, &st);
+    if (r != FS_OK)
+        return fail(sh, src_arg, r);
+    if (st.type != FS_FILE)
+        return fail(sh, src_arg, FS_ERR_IS_DIR);
+    struct fs_stat ds;
+    if (fs_stat(dst, &ds) == FS_OK && ds.type == FS_DIR) {
+        const char *base = strrchr(src, '/');
+        char joined[FS_PATH_MAX];
+        if (fs_path_resolve(dst, base + 1, joined, sizeof(joined)) != FS_OK)
+            return fail(sh, dst_arg, FS_ERR_NAME_TOO_LONG);
+        strlcpy(dst, joined, sizeof(dst));
+    }
+    if (strcmp(src, dst) == 0) {
+        P("%s: that is the same file\n", src_arg);
+        return 1;
+    }
+    char *buf = kmalloc(st.size + 1);
+    if (buf == NULL) {
+        P("Not enough memory to copy %s.\n", src_arg);
+        return 1;
+    }
+    size_t len = 0;
+    r = fs_read_file(src, buf, st.size, &len);
+    if (r == FS_OK)
+        r = fs_write_file(dst, buf, len, false);
+    kfree(buf);
+    return r == FS_OK ? 0 : fail(sh, dst_arg, r);
+}
+
+static int cmd_cp(struct shell *sh, int argc, char **argv)
+{
+    if (argc != 3) {
+        P("usage: cp <file> <new name or folder>\n");
+        return 1;
+    }
+    return copy_file(sh, argv[1], argv[2]);
+}
+
+static int cmd_mv(struct shell *sh, int argc, char **argv)
+{
+    if (argc != 3) {
+        P("usage: mv <file> <new name or folder>\n");
+        return 1;
+    }
+    char src[FS_PATH_MAX];
+    if (!resolve(sh, argv[1], src) || copy_file(sh, argv[1], argv[2]) != 0)
+        return 1;
+    fs_status_t r = fs_unlink(src);
+    return r == FS_OK ? 0 : fail(sh, argv[1], r);
+}
+
+/* Read a whole file for head/wc/grep; NULL after printing why. */
+static char *slurp(struct shell *sh, const char *arg, size_t *len)
+{
+    char path[FS_PATH_MAX];
+    if (!resolve(sh, arg, path))
+        return NULL;
+    struct fs_stat st;
+    fs_status_t r = fs_stat(path, &st);
+    if (r != FS_OK || st.type != FS_FILE) {
+        fail(sh, arg, r != FS_OK ? r : FS_ERR_IS_DIR);
+        return NULL;
+    }
+    char *buf = kmalloc(st.size + 1);
+    if (buf == NULL) {
+        P("Not enough memory to read %s.\n", arg);
+        return NULL;
+    }
+    if (fs_read_file(path, buf, st.size, len) != FS_OK)
+        *len = 0;
+    buf[*len] = '\0';
+    return buf;
+}
+
+static int cmd_head(struct shell *sh, int argc, char **argv)
+{
+    uint64_t lines = 10;
+    int a = 1;
+    if (argc > 2 && strcmp(argv[1], "-n") == 0) {
+        if (!parse_uint(argv[2], &lines)) {
+            P("head: -n needs a number\n");
+            return 1;
+        }
+        a = 3;
+    }
+    if (a >= argc) {
+        P("usage: head [-n LINES] <file>\n");
+        return 1;
+    }
+    size_t len;
+    char *buf = slurp(sh, argv[a], &len);
+    if (buf == NULL)
+        return 1;
+    size_t i = 0;
+    for (uint64_t n = 0; i < len && n < lines; i++)
+        if (buf[i] == '\n')
+            n++;
+    shell_write(sh, buf, i);
+    if (i > 0 && buf[i - 1] != '\n')
+        shell_write(sh, "\n", 1);
+    kfree(buf);
+    return 0;
+}
+
+static int cmd_wc(struct shell *sh, int argc, char **argv)
+{
+    if (argc < 2) {
+        P("usage: wc <file>...\n");
+        return 1;
+    }
+    for (int a = 1; a < argc; a++) {
+        size_t len;
+        char *buf = slurp(sh, argv[a], &len);
+        if (buf == NULL)
+            return 1;
+        unsigned lines = 0, words = 0;
+        bool in_word = false;
+        for (size_t i = 0; i < len; i++) {
+            char c = buf[i];
+            lines += c == '\n';
+            bool space = c == ' ' || c == '\n' || c == '\t' || c == '\r';
+            if (!space && !in_word)
+                words++;
+            in_word = !space;
+        }
+        P("%6u lines %6u words %8lu bytes  %s\n", lines, words, len, argv[a]);
+        kfree(buf);
+    }
+    return 0;
+}
+
+static int cmd_grep(struct shell *sh, int argc, char **argv)
+{
+    if (argc < 3) {
+        P("usage: grep <text> <file>...\n");
+        return 1;
+    }
+    unsigned found = 0;
+    size_t n = strlen(argv[1]);
+    for (int a = 2; a < argc; a++) {
+        size_t len;
+        char *buf = slurp(sh, argv[a], &len);
+        if (buf == NULL)
+            return 1;
+        unsigned line_no = 1;
+        for (size_t s = 0; s < len; line_no++) {
+            size_t e = s;
+            while (e < len && buf[e] != '\n')
+                e++;
+            bool hit = false;
+            for (size_t i = s; i + n <= e && !hit; i++)
+                hit = strncasecmp(buf + i, argv[1], n) == 0;
+            if (hit) {
+                if (argc > 3)
+                    P("%s:", argv[a]);
+                P("%u: ", line_no);
+                shell_write(sh, buf + s, e - s);
+                shell_write(sh, "\n", 1);
+                found++;
+            }
+            s = e + 1;
+        }
+        kfree(buf);
+    }
+    return found > 0 ? 0 : 1;
+}
+
+static int cmd_df(struct shell *sh, int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    struct fs_usage u;
+    fs_get_usage(&u);
+    struct pmm_stats ps;
+    pmm_get_stats(&ps);
+    P("Disk                       Used         Size  Use%%\n");
+    P("BharatOS files (RAM)  %7lu KB  %8lu KB  %3lu%%  (%u of %u files and folders)\n",
+      u.bytes / 1024, u.max_bytes / 1024, u.max_bytes ? u.bytes * 100 / u.max_bytes : 0,
+      u.nodes, u.max_nodes);
+    uint64_t total = ps.managed_pages * 4, used = ps.allocated_pages * 4;
+    P("Memory (RAM)          %7lu MB  %8lu MB  %3lu%%\n", used / 1024, total / 1024,
+      total ? used * 100 / total : 0);
+    return 0;
+}
+
+/* ---- network ------------------------------------------------------------------- */
+
+static bool need_net(struct shell *sh)
+{
+    if (net_up())
+        return true;
+    P("No network card was found. Start QEMU with a network (python build.py run does).\n");
+    return false;
+}
+
+static int cmd_net(struct shell *sh, int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    if (!need_net(sh))
+        return 1;
+    uint8_t m[6];
+    net_mac(m);
+    char ip[16], gw[16];
+    net_format_ip(net_ip(), ip);
+    net_format_ip(net_gateway(), gw);
+    struct net_stats st;
+    net_get_stats(&st);
+    P("Network card  Intel e1000, address %02x:%02x:%02x:%02x:%02x:%02x\n", m[0], m[1], m[2], m[3], m[4], m[5]);
+    P("This machine  %s   gateway %s   name server 10.0.2.3\n", ip, gw);
+    P("Packets       %lu in, %lu out; %lu TCP segments in, %lu resent\n", st.frames_in, st.frames_out,
+      st.tcp_segments_in, st.tcp_resent);
+    P("Try: ping 10.0.2.2   host example.com   fetch http://example.com/\n");
+    return 0;
+}
+
+static int cmd_ping(struct shell *sh, int argc, char **argv)
+{
+    if (argc < 2) {
+        P("usage: ping <name or address> [count]\n");
+        return 1;
+    }
+    if (!need_net(sh))
+        return 1;
+    uint64_t count = 4;
+    if (argc > 2 && (!parse_uint(argv[2], &count) || count == 0 || count > 100)) {
+        P("ping: count must be 1 to 100\n");
+        return 1;
+    }
+    uint32_t ip;
+    net_status_t st = net_resolve(argv[1], &ip);
+    if (st != NET_OK) {
+        P("ping: %s: %s\n", argv[1], net_status_str(st));
+        return 1;
+    }
+    char a[16];
+    net_format_ip(ip, a);
+    P("Pinging %s (%s):\n", argv[1], a);
+    unsigned ok = 0;
+    for (uint64_t i = 0; i < count; i++) {
+        uint64_t us = 0;
+        st = net_ping(ip, (uint16_t)(i + 1), 1000, &us);
+        if (st == NET_OK) {
+            P("  reply from %s: seq=%lu time=%lu.%03lu ms\n", a, i + 1, us / 1000, us % 1000);
+            ok++;
+        } else {
+            P("  seq=%lu: %s\n", i + 1, net_status_str(st));
+        }
+        if (i + 1 < count)
+            sched_sleep(SCHED_TIMER_HZ / 4);
+    }
+    P("%u of %lu answered.\n", ok, count);
+    return ok > 0 ? 0 : 1;
+}
+
+static int cmd_host(struct shell *sh, int argc, char **argv)
+{
+    if (argc != 2) {
+        P("usage: host <name>\n");
+        return 1;
+    }
+    if (!need_net(sh))
+        return 1;
+    uint32_t ip;
+    net_status_t st = net_resolve(argv[1], &ip);
+    if (st != NET_OK) {
+        P("%s: %s\n", argv[1], net_status_str(st));
+        return 1;
+    }
+    char a[16];
+    net_format_ip(ip, a);
+    P("%s is at %s\n", argv[1], a);
+    return 0;
+}
+
+static int cmd_fetch(struct shell *sh, int argc, char **argv)
+{
+    if (argc != 2) {
+        P("usage: fetch <http://address/page>   (add > file.html to save it)\n");
+        return 1;
+    }
+    if (!need_net(sh))
+        return 1;
+    char *buf = kmalloc(NET_PAGE_MAX + 1);
+    if (buf == NULL) {
+        P("Not enough memory.\n");
+        return 1;
+    }
+    size_t len = 0;
+    int status = 0;
+    net_status_t st = http_get(argv[1], buf, NET_PAGE_MAX + 1, &len, &status, NULL);
+    if (st == NET_OK || (st == NET_ERR_NO_SPACE && len > 0)) {
+        shell_write(sh, buf, len);
+        if (len > 0 && buf[len - 1] != '\n')
+            shell_write(sh, "\n", 1);
+        if (sh->cap == NULL)
+            P("[HTTP %d, %lu bytes]\n", status, len);
+    } else {
+        P("fetch: %s: %s\n", argv[1], net_status_str(st));
+    }
+    kfree(buf);
+    return st == NET_OK ? 0 : 1;
 }
 
 /* ---- system information --------------------------------------------------- */
@@ -710,7 +1058,7 @@ static int cmd_about(struct shell *sh, int argc, char **argv)
     selftest_totals(&bp, &bf);
     struct pmm_stats ps;
     pmm_get_stats(&ps);
-    P("BharatOS V1: a desktop with windows, files in memory, login and terminal\n");
+    P("BharatOS V1: a desktop with a browser, video, code and its own TCP/IP\n");
     P("An operating system written from scratch for x86-64 PCs, in C and assembly.\n");
     P("  CPUs:        %u, each with its own run queue; idle CPUs steal work\n", smp_cpu_count());
     P("  Memory:      %lu MiB; buddy page allocator, slab caches, demand paging\n",
@@ -761,6 +1109,13 @@ static const struct command commands[] = {
     { "mkdir",     cmd_mkdir,     "make a folder" },
     { "rm",        cmd_rm,        "delete a file or an empty folder" },
     { "touch",     cmd_touch,     "make an empty file" },
+    { "cp",        cmd_cp,        "copy a file (cp a.txt b.txt, cp a.txt /docs)" },
+    { "mv",        cmd_mv,        "move or rename a file" },
+    { "tree",      cmd_tree,      "show a folder and everything inside it" },
+    { "head",      cmd_head,      "first lines of a file (head -n 5 notes.txt)" },
+    { "wc",        cmd_wc,        "count lines, words and bytes" },
+    { "grep",      cmd_grep,      "lines of a file containing some text" },
+    { "df",        cmd_df,        "how full the disk and memory are" },
     { "clear",     cmd_clear,     "clear the screen" },
     { "whoami",    cmd_whoami,    "show your name" },
     { "uptime",    cmd_uptime,    "time since the system started" },
@@ -773,6 +1128,10 @@ static const struct command commands[] = {
     { "checks",    cmd_checks,    "run the system's self-checks" },
     { "lockdemo",  cmd_lockdemo,  "show the lock-order checker catching a mistake" },
     { "crashdemo", cmd_crashdemo, "crash a thread on purpose and show the report" },
+    { "net",       cmd_net,       "network card, address and traffic" },
+    { "ping",      cmd_ping,      "check another machine answers (ping 10.0.2.2)" },
+    { "host",      cmd_host,      "look up a name's address (host example.com)" },
+    { "fetch",     cmd_fetch,     "download a web page (fetch http://example.com/)" },
     { "about",     cmd_about,     "about BharatOS" },
     { "reboot",    cmd_reboot,    "restart the machine" },
     { "logout",    cmd_logout,    "log out (back to the login prompt)" },
@@ -787,6 +1146,7 @@ static int cmd_help(struct shell *sh, int argc, char **argv)
     for (unsigned i = 0; i < NCOMMANDS; i++)
         P("  %-10s %s\n", commands[i].name, commands[i].help);
     P("Send any command's output to a file with > (replace) or >> (add).\n");
+    P("Tab completes command and file names; Up/Down bring back earlier lines.\n");
     return 0;
 }
 
@@ -914,4 +1274,76 @@ void shell_prompt(const struct shell *sh, char *buf, size_t size)
         ksnprintf(buf, size, "%s@bharat:~%s$ ", sh->user, sh->cwd + hl);
     else
         ksnprintf(buf, size, "%s@bharat:%s$ ", sh->user, sh->cwd);
+}
+
+/* ---- Tab completion ------------------------------------------------------------- */
+
+/* Keep in `best` only what it shares with `name`. */
+static void common_prefix(char *best, const char *name)
+{
+    size_t k = 0;
+    while (best[k] != '\0' && best[k] == name[k])
+        k++;
+    best[k] = '\0';
+}
+
+bool shell_complete(void *cctx, const char *line, char *out, size_t cap)
+{
+    struct shell *sh = cctx;
+    const char *word = strrchr(line, ' ');
+    word = word != NULL ? word + 1 : line;
+    size_t keep = (size_t)(word - line);
+    char best[FS_PATH_MAX] = "", dir_typed[FS_PATH_MAX] = "";
+    const char *prefix = word;
+    unsigned matches = 0;
+    bool best_dir = false;
+    if (word == line) {                          /* the command name */
+        size_t wl = strlen(word);
+        for (unsigned i = 0; i < NCOMMANDS; i++) {
+            if (strncmp(commands[i].name, word, wl) != 0)
+                continue;
+            if (matches++ == 0)
+                strlcpy(best, commands[i].name, sizeof(best));
+            else
+                common_prefix(best, commands[i].name);
+        }
+    } else {                                     /* a file name */
+        const char *slash = strrchr(word, '/');
+        if (slash != NULL) {
+            size_t dl = (size_t)(slash - word) + 1;
+            if (dl >= sizeof(dir_typed))
+                return false;
+            memcpy(dir_typed, word, dl);
+            dir_typed[dl] = '\0';
+            prefix = slash + 1;
+        }
+        char dir[FS_PATH_MAX];
+        if (fs_path_resolve(sh->cwd, dir_typed[0] ? dir_typed : ".", dir, sizeof(dir)) != FS_OK)
+            return false;
+        size_t pl = strlen(prefix);
+        struct fs_dirent e;
+        for (unsigned i = 0; fs_list(dir, i, &e) == FS_OK; i++) {
+            if (strncmp(e.name, prefix, pl) != 0)
+                continue;
+            if (matches++ == 0) {
+                strlcpy(best, e.name, sizeof(best));
+                best_dir = e.type == FS_DIR;
+            } else {
+                common_prefix(best, e.name);
+            }
+        }
+    }
+    if (matches == 0 || (matches > 1 && strlen(best) <= strlen(prefix)))
+        return false;
+    if (keep + strlen(dir_typed) + strlen(best) + 2 >= cap)
+        return false;
+    memcpy(out, line, keep);
+    out[keep] = '\0';
+    strlcpy(out + keep, dir_typed, cap - keep);
+    size_t n = strlen(out);
+    strlcpy(out + n, best, cap - n);
+    n = strlen(out);
+    if (matches == 1)
+        strlcpy(out + n, best_dir ? "/" : " ", cap - n);
+    return strcmp(out, line) != 0;
 }

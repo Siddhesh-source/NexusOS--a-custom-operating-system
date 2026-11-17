@@ -27,7 +27,7 @@
 #include <stdint.h>
 #include "gfx.h"
 
-#define WM_MAX_WINDOWS 8
+#define WM_MAX_WINDOWS 10
 #define WM_MAX_APPS    8
 
 struct window;
@@ -44,6 +44,7 @@ struct app {
     void (*key)(struct window *w, uint16_t key);
     void (*click)(struct window *w, int32_t x, int32_t y);   /* body-relative */
     void (*tick)(struct window *w);                /* about once a second */
+    void (*anim)(struct window *w);                /* every frame (~50 a second): video */
 };
 
 struct window {
@@ -91,6 +92,8 @@ struct gfx_rect wm_body(const struct window *w);
 void wm_key(uint16_t key);
 void wm_mouse(int32_t x, int32_t y, uint8_t buttons);
 void wm_tick(void);
+/* Every frame: lets moving windows (the Player) draw their next picture. */
+void wm_animate(void);
 bool wm_compose(void);
 
 struct gfx_surface *wm_back(void);

@@ -93,6 +93,13 @@ int32_t gfx_text(int32_t x, int32_t y, const char *s, uint32_t rgb, enum font_id
 int32_t gfx_text_width(const char *s, enum font_id f);
 int32_t gfx_line_height(enum font_id f);
 
+/* An image of w x h palette indexes (one byte per pixel), each pixel
+ * drawn as a scale x scale square. `packed` holds 256 colours already
+ * packed with gfx_pack (the Player's video frames). Clipped like
+ * everything else. */
+void gfx_image8(int32_t x, int32_t y, const uint8_t *idx, int32_t w, int32_t h, int32_t scale,
+                const uint32_t *packed);
+
 /* Copy rectangle `r` from `src` to the same place in `dst` (clipped to
  * both). The desktop's "present" step. */
 void gfx_copy(struct gfx_surface *dst, const struct gfx_surface *src, struct gfx_rect r);

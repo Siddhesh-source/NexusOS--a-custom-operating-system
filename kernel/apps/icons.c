@@ -38,3 +38,41 @@ void icon_about(struct gfx_rect t)
 {
     centred(t, "i", COL_SURFACE, FONT_HEADING);
 }
+
+void icon_code(struct gfx_rect t)
+{
+    centred(t, "</>", COL_SURFACE, FONT_MEDIUM);
+}
+
+void icon_player(struct gfx_rect t)
+{
+    /* a play triangle, drawn as narrowing bars */
+    for (int32_t i = 0; i < 16; i++) {
+        int32_t h = 22 - (i * 22) / 16;
+        gfx_fill(gfx_rect(t.x + 16 + i, t.y + t.h / 2 - h / 2, 1, h), COL_SAFFRON);
+    }
+}
+
+void icon_browser(struct gfx_rect t)
+{
+    struct gfx_rect g = gfx_rect(t.x + t.w / 2 - 13, t.y + t.h / 2 - 13, 26, 26);
+    gfx_round(g, 13, COL_SURFACE, 255);
+    gfx_round(gfx_grow(g, -2), 11, 0x2A7C76, 255);
+    gfx_fill(gfx_rect(g.x + 2, g.y + 12, 22, 2), COL_SURFACE);           /* equator */
+    gfx_fill(gfx_rect(g.x + 12, g.y + 2, 2, 22), COL_SURFACE);           /* meridian */
+}
+
+const struct app *app_for_file(const char *path)
+{
+    const char *dot = path != NULL ? strrchr(path, '.') : NULL;
+    if (dot == NULL)
+        return &app_editor;
+    if (strcmp(dot, ".bvid") == 0)
+        return &app_player;
+    if (strcmp(dot, ".html") == 0 || strcmp(dot, ".htm") == 0)
+        return &app_browser;
+    if (strcmp(dot, ".c") == 0 || strcmp(dot, ".h") == 0 || strcmp(dot, ".py") == 0
+        || strcmp(dot, ".sh") == 0 || strcmp(dot, ".md") == 0)
+        return &app_code;
+    return &app_editor;
+}

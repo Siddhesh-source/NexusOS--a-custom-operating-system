@@ -142,6 +142,8 @@ static void session(void)
     say(hello);
 
     char prompt[FS_PATH_MAX + 40];
+    le.complete = shell_complete;
+    le.cctx = &sh;
     while (!sh.logout) {
         shell_prompt(&sh, prompt, sizeof(prompt));
         say(prompt);
@@ -152,6 +154,7 @@ static void session(void)
         strlcpy(line, le.buf, sizeof(line));
         shell_run(&sh, line);
     }
+    le.complete = NULL;                 /* the shell is gone: no completion at login */
     say("Goodbye.\n");
     current_user[0] = '\0';
 }

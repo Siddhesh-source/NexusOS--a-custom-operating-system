@@ -3,8 +3,9 @@
 
 /* The shell: runs the commands typed in the terminal.
  *
- *   help ls cd pwd cat echo mkdir rm touch clear whoami uptime mem cpus
- *   ps top kill run checks lockdemo crashdemo about reboot logout
+ *   help ls cd pwd cat echo mkdir rm touch cp mv tree head wc grep df
+ *   clear whoami uptime mem cpus ps top kill run checks lockdemo
+ *   crashdemo net ping host fetch about reboot logout
  *
  * Any command's output can go to a file: `ls > list.txt` replaces the
  * file, `echo more >> list.txt` adds to its end.
@@ -55,6 +56,12 @@ void shell_init(struct shell *sh, const char *user, le_output_t out, void *ctx);
 
 /* Run one command line. Returns 0 on success (also in sh->status). */
 int shell_run(struct shell *sh, const char *line);
+
+/* Tab completion for the line editor (lineedit.h `complete`; cctx is
+ * the shell): the first word from the command names, later words from
+ * the file names in the folder they point into. Fills `out` with the
+ * longer line; false if there is nothing to add. */
+bool shell_complete(void *cctx, const char *line, char *out, size_t cap);
 
 /* The prompt text, e.g. "asha@bharat:~/notes$ ". */
 void shell_prompt(const struct shell *sh, char *buf, size_t size);
