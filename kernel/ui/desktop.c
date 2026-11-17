@@ -11,6 +11,7 @@
 #include "kprintf.h"
 #include "string.h"
 #include "rtc.h"
+#include "heap.h"
 
 const struct app *const desktop_apps[] = {
     &app_terminal, &app_files, &app_code, &app_browser, &app_player,
@@ -199,9 +200,64 @@ static void login_key(uint16_t key)
     }
 }
 
+/* ---- screenshots ------------------------------------------------------------ */
+
+fs_status_t desktop_screenshot(char *path, size_t cap)
+{
+    if (!logged_in || path == NULL || cap < FS_PATH_MAX)
+        return FS_ERR_INVALID;
+    /* The first free name: screenshot-1.ppm, screenshot-2.ppm, ... */
+    struct fs_stat st;
+    unsigned n = 1;
+    for (; n <= DESKTOP_SHOTS_MAX; n++) {
+        ksnprintf(path, cap, "/home/%s/screenshot-%u.ppm", user, n);
+        if (fs_stat(path, &st) == FS_ERR_NOT_FOUND)
+            break;
+    }
+    if (n > DESKTOP_SHOTS_MAX)
+        return FS_ERR_EXISTS;
+    /* PPM: a short text header, then red, green, blue bytes per pixel. */
+    struct gfx_surface *b = wm_back();
+    char head[32];
+    int hl = ksnprintf(head, sizeof(head), "P6\n%d %d\n255\n", b->w, b->h);
+    size_t len = (size_t)hl + (size_t)b->w * (size_t)b->h * 3;
+    uint8_t *buf = kmalloc(len);
+    if (buf == NULL)
+        return FS_ERR_NO_SPACE;
+    memcpy(buf, head, (size_t)hl);
+    uint8_t *p = buf + hl;
+    for (int32_t y = 0; y < b->h; y++)
+        for (int32_t x = 0; x < b->w; x++) {
+            uint32_t c = gfx_get(b, x, y);
+            *p++ = (uint8_t)(c >> 16);
+            *p++ = (uint8_t)(c >> 8);
+            *p++ = (uint8_t)c;
+        }
+    fs_status_t r = fs_write_file(path, buf, len, false);
+    kfree(buf);
+    return r;
+}
+
+/* Print Screen: save the screen and say where it went. */
+static void screenshot_key(void)
+{
+    char path[FS_PATH_MAX], msg[96];
+    fs_status_t r = desktop_screenshot(path, sizeof(path));
+    if (r == FS_OK)
+        ksnprintf(msg, sizeof(msg), "Screenshot saved: %s", path);
+    else if (r == FS_ERR_EXISTS)
+        ksnprintf(msg, sizeof(msg), "Too many screenshots; delete some in Files");
+    else
+        ksnprintf(msg, sizeof(msg), "Could not save the screenshot: %s", fs_status_str(r));
+    kprintf("[desktop] %s\n", msg);
+    wm_toast(msg);
+}
+
 void desktop_key(uint16_t key)
 {
-    if (logged_in)
+    if (logged_in && key == INPUT_KEY_PRINT)
+        screenshot_key();
+    else if (logged_in)
         wm_key(key);
     else
         login_key(key);

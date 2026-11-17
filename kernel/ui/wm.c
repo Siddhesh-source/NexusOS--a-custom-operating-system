@@ -22,6 +22,8 @@ static void topbar_refresh(void);
 static struct gfx_rect dock_rect(void);
 static struct gfx_rect damage;
 static struct wm_stats stats;
+static char toast[96];
+static unsigned toast_left;                    /* seconds (wm_tick) */
 
 /* The mouse pointer and a window being dragged. */
 static int32_t px, py;
@@ -94,6 +96,25 @@ void wm_set_backdrop(void (*fn)(void))
 struct gfx_surface *wm_back(void)
 {
     return &back;
+}
+
+static struct gfx_rect toast_rect(void)
+{
+    int32_t w = gfx_text_width(toast, FONT_UI) + 40;
+    return gfx_rect((back.w - w) / 2, back.h - 160, w, 38);
+}
+
+void wm_toast(const char *msg)
+{
+    wm_damage(toast_rect());
+    strlcpy(toast, msg != NULL ? msg : "", sizeof(toast));
+    toast_left = 4;
+    wm_damage(toast_rect());
+}
+
+const char *wm_toast_text(void)
+{
+    return toast;
 }
 
 void wm_get_stats(struct wm_stats *out)
@@ -458,6 +479,11 @@ bool wm_compose(void)
         draw_topbar();
         draw_dock();
     }
+    if (toast[0] != '\0') {
+        struct gfx_rect t = toast_rect();
+        gfx_round(t, 19, COL_CHROME, 230);
+        gfx_text(t.x + 20, t.y + (t.h - gfx_line_height(FONT_UI)) / 2, toast, COL_ON_DARK, FONT_UI);
+    }
     if (pointer_shown)
         draw_cursor();
     if (screen != NULL)
@@ -545,6 +571,8 @@ void wm_tick(void)
         if (order[i]->app->tick != NULL)
             order[i]->app->tick(order[i]);
     topbar_refresh();                                   /* the clock */
+    if (toast[0] != '\0' && --toast_left == 0)
+        wm_toast("");
 }
 
 /* ---- widgets ------------------------------------------------------------- */

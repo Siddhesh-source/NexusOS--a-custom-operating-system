@@ -118,6 +118,53 @@ static void test_net(void)
 
 /* ---- apps ------------------------------------------------------------------------- */
 
+static void test_code_tabs_find(void)
+{
+    struct window *w = wm_open(&app_code, "/code/hello.c");
+    unsigned at = 9;
+    size_t cur = 0;
+    const char *msg = "";
+    if (!CHECK(w != NULL && code_tabs(w, &at, NULL, NULL) == 1 && at == 0, "Code starts with one tab"))
+        return;
+    CHECK(code_open_tab(w, "/code/demo.sh") && code_tabs(w, &at, NULL, NULL) == 2 && at == 1
+          && strstr(code_text(w, NULL, NULL), "echo") != NULL, "opening another file adds a tab and shows it");
+    CHECK(code_open_tab(w, "/code/hello.c") && code_tabs(w, &at, NULL, NULL) == 2 && at == 0,
+          "opening a file that is already open shows its tab");
+    desktop_key(20);                                    /* Ctrl+T */
+    code_tabs(w, &at, NULL, NULL);
+    CHECK(at == 1, "Ctrl+T moves to the next tab");
+    code_open_tab(w, "/code/fib.py");
+    code_open_tab(w, "/code/README.md");
+    CHECK(!code_open_tab(w, "/etc/motd") && code_tabs(w, NULL, NULL, &msg) == CODE_TABS
+          && strstr(msg, "All tabs are in use") != NULL, "a fifth tab is refused with a reason");
+    desktop_key('x');                                   /* README.md is now unsaved */
+    desktop_key(17);                                    /* Ctrl+Q */
+    CHECK(code_tabs(w, NULL, NULL, &msg) == CODE_TABS && strstr(msg, "Not saved") != NULL,
+          "closing an unsaved tab asks first");
+    desktop_key(17);
+    CHECK(code_tabs(w, NULL, NULL, NULL) == CODE_TABS - 1, "Ctrl+Q twice closes it without saving");
+    CHECK(!code_open_tab(w, "/no/such/file.c"), "a missing file is not opened in a new tab");
+    code_open_tab(w, "/code/hello.c");
+    desktop_key(6);                                     /* Ctrl+F */
+    type("MAIN");
+    desktop_key('\n');
+    code_tabs(w, NULL, &cur, &msg);
+    const char *text = code_text(w, NULL, NULL);
+    CHECK(strncmp(text + cur, "main", 4) == 0 && strstr(msg, "Found on line 11") != NULL,
+          "Ctrl+F finds text, ignoring upper/lower case");
+    type("zzz");
+    desktop_key('\n');
+    code_tabs(w, NULL, NULL, &msg);
+    CHECK(strstr(msg, "is not in this file") != NULL, "text that is not there is reported");
+    desktop_key(0x1B);
+    bool unsaved = false;
+    desktop_key('q');
+    code_text(w, &unsaved, NULL);
+    CHECK(unsaved, "Esc closes the find bar and typing edits the file again");
+    wm_compose();
+    wm_close(w);
+}
+
 static void test_code(void)
 {
     st_section("Code");
@@ -147,6 +194,7 @@ static void test_code(void)
     wm_compose();
     wm_close(w);
     fs_unlink("/home/tester/t.sh");
+    test_code_tabs_find();
     CHECK(app_for_file("/a/b.c") == &app_code && app_for_file("x.bvid") == &app_player
           && app_for_file("/www/home.html") == &app_browser && app_for_file("notes.txt") == &app_editor,
           "each kind of file opens in the app that suits it");
@@ -349,6 +397,8 @@ static void test_login_languages(void)
           "an unknown phrase draws nothing");
     login_reset();
     wm_set_backdrop(login_draw);
+    char shot[FS_PATH_MAX];
+    CHECK(desktop_screenshot(shot, sizeof(shot)) == FS_ERR_INVALID, "no screenshot is saved before anyone signs in");
     struct gfx_surface *b = wm_back();
     int32_t cx = b->w / 2, cy = b->h / 2;
     struct gfx_rect label = gfx_rect(cx - 150, cy - 2, 300, 26), hint = gfx_rect(cx - 150, cy + 80, 300, 26);
@@ -377,6 +427,62 @@ static void test_login_languages(void)
     login_set_language(LOGIN_HINDI);
 }
 
+/* ---- screenshots ------------------------------------------------------------- */
+
+static void test_screenshot(void)
+{
+    st_section("Screenshots (Print Screen)");
+    struct kbd_decoder d;
+    memset(&d, 0, sizeof(d));
+    struct input_event ev;
+    bool got = false;
+    const uint8_t seq[] = { 0xE0, 0x2A, 0xE0, 0x37 };
+    for (unsigned i = 0; i < sizeof(seq); i++)
+        if (kbd_decode(&d, seq[i], &ev))
+            got = ev.key == INPUT_KEY_PRINT;
+    CHECK(got, "the Print Screen key is read from the keyboard");
+    char path[FS_PATH_MAX];
+    for (unsigned i = 1; i <= DESKTOP_SHOTS_MAX; i++) {
+        ksnprintf(path, sizeof(path), "/home/tester/screenshot-%u.ppm", i);
+        fs_unlink(path);
+    }
+    wm_compose();
+    desktop_key(INPUT_KEY_PRINT);
+    struct gfx_surface *b = wm_back();
+    struct fs_stat st;
+    char head[32];
+    int hl = ksnprintf(head, sizeof(head), "P6\n%d %d\n255\n", b->w, b->h);
+    size_t want = (size_t)hl + (size_t)b->w * (size_t)b->h * 3, n = 0;
+    CHECK(strstr(wm_toast_text(), "Screenshot saved: /home/tester/screenshot-1.ppm") != NULL,
+          "Print Screen saves the screen and says where");
+    CHECK(fs_stat("/home/tester/screenshot-1.ppm", &st) == FS_OK && st.size == want,
+          "the picture has every pixel of the screen");
+    uint8_t *buf = kmalloc(want);
+    if (buf != NULL && fs_read_file("/home/tester/screenshot-1.ppm", buf, want, &n) == FS_OK) {
+        int32_t x = b->w / 2, y = b->h - 1;
+        const uint8_t *px = buf + hl + ((size_t)y * (size_t)b->w + (size_t)x) * 3;
+        uint32_t c = gfx_get(b, x, y);
+        CHECK(memcmp(buf, head, (size_t)hl) == 0 && px[0] == (uint8_t)(c >> 16) && px[1] == (uint8_t)(c >> 8)
+              && px[2] == (uint8_t)c, "it is a PPM picture whose pixels match the screen");
+    } else {
+        CHECK(false, "the screenshot can be read back");
+    }
+    kfree(buf);
+    desktop_key(INPUT_KEY_PRINT);
+    CHECK(fs_stat("/home/tester/screenshot-2.ppm", &st) == FS_OK, "a second screenshot gets the next name");
+    for (unsigned i = 3; i <= DESKTOP_SHOTS_MAX; i++) {
+        ksnprintf(path, sizeof(path), "/home/tester/screenshot-%u.ppm", i);
+        fs_write_file(path, "x", 1, false);
+    }
+    desktop_key(INPUT_KEY_PRINT);
+    CHECK(strstr(wm_toast_text(), "Too many screenshots") != NULL, "when every name is taken it says so");
+    for (unsigned i = 1; i <= DESKTOP_SHOTS_MAX; i++) {
+        ksnprintf(path, sizeof(path), "/home/tester/screenshot-%u.ppm", i);
+        fs_unlink(path);
+    }
+    wm_toast("");
+}
+
 bool apps_run_tests(void)
 {
     st_begin();
@@ -391,6 +497,7 @@ bool apps_run_tests(void)
         test_player();
         test_browser();
         test_files_places();
+        test_screenshot();
     }
     wm_close_all();
     desktop_logout();

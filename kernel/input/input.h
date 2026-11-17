@@ -61,6 +61,7 @@ enum input_key {
     INPUT_KEY_PAGE_DOWN,
     INPUT_KEY_INSERT,
     INPUT_KEY_F1,        /* F1..F12 follow in order */
+    INPUT_KEY_PRINT = INPUT_KEY_F1 + 12,   /* Print Screen */
 };
 
 #define INPUT_MOD_SHIFT  (1u << 0)

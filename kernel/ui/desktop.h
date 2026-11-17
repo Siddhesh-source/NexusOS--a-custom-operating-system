@@ -24,6 +24,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
+#include "fs.h"
 
 /* Start the desktop thread if there is a screen to draw on. */
 void desktop_start(void);
@@ -46,6 +48,13 @@ const char *login_message(void);
 enum login_lang { LOGIN_ENGLISH, LOGIN_HINDI, LOGIN_MARATHI };
 void login_set_language(enum login_lang l);
 enum login_lang login_language(void);
+
+/* Print Screen: save the screen as /home/<user>/screenshot-N.ppm (the
+ * first free N up to DESKTOP_SHOTS_MAX); the path goes into `path` (at
+ * least FS_PATH_MAX bytes). FS_ERR_EXISTS when all names are taken;
+ * FS_ERR_INVALID when nobody is logged in. */
+#define DESKTOP_SHOTS_MAX 20
+fs_status_t desktop_screenshot(char *path, size_t cap);
 
 /* The tour: a list of steps run by the desktop thread. */
 void tour_start(bool fast);

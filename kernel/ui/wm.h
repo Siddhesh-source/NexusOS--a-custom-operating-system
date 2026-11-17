@@ -97,6 +97,9 @@ void wm_animate(void);
 bool wm_compose(void);
 
 struct gfx_surface *wm_back(void);
+/* A short message shown above the dock for a few seconds ("" clears it). */
+void wm_toast(const char *msg);
+const char *wm_toast_text(void);
 void wm_get_stats(struct wm_stats *out);
 /* Rectangle of top-bar item `i`: apps 0..n-1, then "Log out", then the
  * health badge (self-tests click them). */

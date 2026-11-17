@@ -57,8 +57,14 @@ const char *files_folder(struct window *w);
 /* Text editor: its text (0-terminated) and whether it has unsaved changes. */
 const char *editor_text(struct window *w, bool *unsaved);
 
-/* Code: its text, whether it is unsaved, and the Run output. */
+/* Code: its text, whether it is unsaved, and the Run output (of the tab
+ * shown). code_open_tab opens a file in a new tab (or shows its tab);
+ * code_tabs gives the number of tabs, the one shown, its cursor and the
+ * status message. */
+#define CODE_TABS 4
 const char *code_text(struct window *w, bool *unsaved, struct textbuf **out);
+bool code_open_tab(struct window *w, const char *path);
+unsigned code_tabs(struct window *w, unsigned *active, size_t *cursor, const char **msg);
 
 /* Player: a .bvid file's header is sound; the frame being shown, frames
  * drawn so far and whether it is playing. */
