@@ -14,6 +14,7 @@
 #include "input.h"
 #include "cpu.h"
 #include "net.h"
+#include "why.h"
 #include "kprintf.h"
 #include "string.h"
 #include <stdarg.h>
@@ -466,13 +467,20 @@ static int cmd_net(struct shell *sh, int argc, char **argv)
         return 1;
     uint8_t m[6];
     net_mac(m);
-    char ip[16], gw[16];
-    net_format_ip(net_ip(), ip);
-    net_format_ip(net_gateway(), gw);
+    struct net_config c;
+    net_get_config(&c);
+    char ip[16], gw[16], dns[16];
+    net_format_ip(c.ip, ip);
+    net_format_ip(c.gateway, gw);
+    net_format_ip(c.dns, dns);
     struct net_stats st;
     net_get_stats(&st);
     P("Network card  Intel e1000, address %02x:%02x:%02x:%02x:%02x:%02x\n", m[0], m[1], m[2], m[3], m[4], m[5]);
-    P("This machine  %s   gateway %s   name server 10.0.2.3\n", ip, gw);
+    P("This machine  %s   gateway %s   name server %s\n", ip, gw, dns);
+    if (c.from_dhcp)
+        P("Settings      from DHCP, lease %u hours\n", c.lease_s / 3600);
+    else
+        P("Settings      fixed (no DHCP server answered)\n");
     P("Packets       %lu in, %lu out; %lu TCP segments in, %lu resent\n", st.frames_in, st.frames_out,
       st.tcp_segments_in, st.tcp_resent);
     P("Try: ping 10.0.2.2   host example.com   fetch http://example.com/\n");
@@ -1128,6 +1136,7 @@ static const struct command commands[] = {
     { "checks",    cmd_checks,    "run the system's self-checks" },
     { "lockdemo",  cmd_lockdemo,  "show the lock-order checker catching a mistake" },
     { "crashdemo", cmd_crashdemo, "crash a thread on purpose and show the report" },
+    { "why",       why_command,   "plain answers: why slow, why crash" },
     { "net",       cmd_net,       "network card, address and traffic" },
     { "ping",      cmd_ping,      "check another machine answers (ping 10.0.2.2)" },
     { "host",      cmd_host,      "look up a name's address (host example.com)" },

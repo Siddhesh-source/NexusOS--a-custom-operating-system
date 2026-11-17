@@ -13,6 +13,7 @@
 #include "desktop.h"
 #include "wm.h"
 #include "net.h"
+#include "crash.h"
 #include "shell.h"
 #include "lineedit.h"
 #include "fs.h"
@@ -33,6 +34,40 @@ static void type(const char *s)
 
 /* ---- network -------------------------------------------------------------------- */
 
+/* A DHCP answer built by hand: `opts` follow the magic cookie. */
+static size_t dhcp_msg(uint8_t *m, uint32_t xid, const uint8_t *opts, size_t n)
+{
+    memset(m, 0, 240);
+    m[0] = 2;
+    m[4] = (uint8_t)(xid >> 24); m[5] = (uint8_t)(xid >> 16); m[6] = (uint8_t)(xid >> 8); m[7] = (uint8_t)xid;
+    m[16] = 10; m[17] = 0; m[18] = 2; m[19] = 99;                 /* your address: 10.0.2.99 */
+    m[236] = 0x63; m[237] = 0x82; m[238] = 0x53; m[239] = 0x63;
+    memcpy(m + 240, opts, n);
+    return 240 + n;
+}
+
+static void test_dhcp_parse(void)
+{
+    static const uint8_t good[] = { 53, 1, 5, 1, 4, 255, 255, 255, 0, 3, 4, 10, 0, 2, 2, 6, 4, 10, 0, 2, 3,
+                                    51, 4, 0, 1, 81, 128, 0, 255 };
+    static const uint8_t overrun[] = { 53, 1, 5, 3, 40, 10, 0 };
+    static const uint8_t no_type[] = { 1, 4, 255, 255, 255, 0, 255 };
+    uint8_t m[300];
+    struct net_dhcp_reply r;
+    size_t n = dhcp_msg(m, 0x1234, good, sizeof(good));
+    CHECK(net_dhcp_parse(m, n, 0x1234, &r) && r.type == 5 && r.ip == 0x0A000263 && r.router == 0x0A000202
+          && r.dns == 0x0A000203 && r.netmask == 0xFFFFFF00 && r.lease_s == 86400,
+          "a DHCP answer is read: address, mask, gateway, name server, lease");
+    CHECK(!net_dhcp_parse(m, n, 0x9999, &r), "an answer meant for another request is ignored");
+    CHECK(!net_dhcp_parse(m, 200, 0x1234, &r), "a DHCP answer cut short is refused");
+    m[236] = 0;
+    CHECK(!net_dhcp_parse(m, n, 0x1234, &r), "a message without the DHCP marker is refused");
+    n = dhcp_msg(m, 0x1234, overrun, sizeof(overrun));
+    CHECK(!net_dhcp_parse(m, n, 0x1234, &r), "an option running past the end is refused");
+    n = dhcp_msg(m, 0x1234, no_type, sizeof(no_type));
+    CHECK(!net_dhcp_parse(m, n, 0x1234, &r) && !net_dhcp_parse(NULL, 0, 0, &r), "an answer with no type is refused");
+}
+
 static void test_net(void)
 {
     st_section("Network");
@@ -51,10 +86,16 @@ static void test_net(void)
     CHECK(http_get("http://:80/", page, sizeof(page), &len, &status, NULL) == NET_ERR_INVALID
           && http_get("http://host:99999/", page, sizeof(page), &len, &status, NULL) == NET_ERR_INVALID,
           "a broken web address is refused");
+    test_dhcp_parse();
     if (!net_up()) {
         kprintf("[test] no network card: the live network checks are skipped\n");
         return;
     }
+    struct net_config cfg;
+    net_get_config(&cfg);
+    CHECK(cfg.from_dhcp && cfg.ip == 0x0A00020F && cfg.gateway == 0x0A000202 && cfg.dns == 0x0A000203
+          && cfg.netmask == 0xFFFFFF00 && cfg.lease_s > 0, "DHCP gave the address, gateway and name server");
+    CHECK(net_dhcp(3000) == NET_OK && net_ip() == 0x0A00020F, "asking DHCP again gets the same address");
     uint8_t mac[6], zero[6] = { 0 };
     net_mac(mac);
     CHECK(memcmp(mac, zero, 6) != 0, "the network card has an address (MAC)");
@@ -265,10 +306,75 @@ static void test_shell_more(void)
     CHECK(!shell_complete(sh, "zzz", done, sizeof(done)), "Tab with no match changes nothing");
     if (net_up())
         CHECK(run(sh, "ping 10.0.2.2 1", "1 of 1 answered"), "ping gets an answer from the gateway");
+    CHECK(run(sh, "why", "why slow") && sh->status != 0, "why alone lists the questions it can answer");
+    CHECK(run(sh, "why rain", "cannot explain 'rain'"), "why says plainly what it cannot explain");
+    struct crash_info ci;
+    crash_get_last(&ci);
+    if (ci.count == 0)
+        CHECK(run(sh, "why crash", "No program has crashed"), "why crash with no crash says so");
+    run(sh, "crashdemo", NULL);
+    CHECK(run(sh, "why crash", "'crashdemo'") && strstr(out_buf, "null") != NULL
+          && strstr(out_buf, "only that thread was stopped") != NULL,
+          "why crash names the program and says what it did wrong");
+    run(sh, "run spin 2", NULL);
+    CHECK(run(sh, "why slow", "busiest thread spin") && strstr(out_buf, "kill") != NULL,
+          "why slow finds a busy thread from live numbers and says how to stop it");
+    CHECK(strstr(out_buf, "memory") != NULL && strstr(out_buf, "CPUs") != NULL, "why slow reports CPU load and memory");
     run(sh, "rm d/c.txt", NULL);
     run(sh, "rm d", NULL);
     run(sh, "rm w.txt", NULL);
     kfree(sh);
+}
+
+/* ---- Hindi and Marathi on the login screen ----------------------------------- */
+
+static uint64_t area_sum(struct gfx_rect r)
+{
+    uint64_t sum = 0;
+    for (int32_t y = r.y; y < r.y + r.h; y++)
+        for (int32_t x = r.x; x < r.x + r.w; x++)
+            sum = sum * 31 + gfx_get(wm_back(), x, y);
+    return sum;
+}
+
+static void test_login_languages(void)
+{
+    st_section("Login in Hindi and Marathi");
+    bool all = true;
+    for (unsigned i = 0; i < PHRASE_COUNT; i++)
+        all &= gfx_phrase_width((enum phrase_id)i) > 0;
+    uint16_t w, h;
+    CHECK(all, "every Hindi and Marathi phrase is in the kernel");
+    CHECK(font_phrase(PHRASE_COUNT, &w, &h) == NULL && gfx_phrase_width((enum phrase_id)99) == 0,
+          "an unknown phrase draws nothing");
+    login_reset();
+    wm_set_backdrop(login_draw);
+    struct gfx_surface *b = wm_back();
+    int32_t cx = b->w / 2, cy = b->h / 2;
+    struct gfx_rect label = gfx_rect(cx - 150, cy - 2, 300, 26), hint = gfx_rect(cx - 150, cy + 80, 300, 26);
+    struct gfx_rect greet = gfx_rect(cx - 120, cy - 160, 240, 40);
+    login_set_language(LOGIN_ENGLISH);
+    wm_compose();
+    uint64_t en = area_sum(label), en_hint = area_sum(hint);
+    unsigned ink = 0;
+    for (int32_t y = greet.y; y < greet.y + greet.h; y++)
+        for (int32_t x = greet.x; x < greet.x + greet.w; x++)
+            ink += (gfx_get(b, x, y) & 0xFF) > 0xC0;
+    CHECK(ink > 100, "the login screen greets in Hindi and Marathi");
+    desktop_key(INPUT_KEY_F1);
+    wm_compose();
+    uint64_t hi = area_sum(label);
+    CHECK(login_language() == LOGIN_HINDI && hi != en && area_sum(hint) != en_hint,
+          "F1 switches the labels to Hindi");
+    desktop_key(INPUT_KEY_F1);
+    wm_compose();
+    uint64_t mr = area_sum(label);
+    CHECK(login_language() == LOGIN_MARATHI && mr != en && mr != hi, "F1 again switches them to Marathi");
+    desktop_key(INPUT_KEY_F1);
+    CHECK(login_language() == LOGIN_ENGLISH, "and F1 once more goes back to English");
+    login_set_language((enum login_lang)7);
+    CHECK(login_language() == LOGIN_ENGLISH, "an unknown language falls back to English");
+    login_set_language(LOGIN_HINDI);
 }
 
 bool apps_run_tests(void)
@@ -277,8 +383,10 @@ bool apps_run_tests(void)
     kprintf("\n[test] ===== Network and apps =====\n");
     test_net();
     test_shell_more();
+    test_login_languages();
     type("tester\n");
-    if (CHECK(desktop_logged_in(), "logged in for the app checks")) {
+    login_set_language(LOGIN_ENGLISH);
+    if (CHECK(desktop_logged_in(), "signing in works with Hindi labels")) {
         test_code();
         test_player();
         test_browser();

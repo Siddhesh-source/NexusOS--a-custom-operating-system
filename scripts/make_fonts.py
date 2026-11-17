@@ -94,12 +94,69 @@ def render(kind: str, size: int, weight: int, line_h: int) -> tuple[bytes, bytes
     return bytes(head), bytes(data)
 
 
+# Hindi and Marathi text for the login screen. Devanagari letters join and
+# change shape next to each other, so whole phrases are shaped here (Pillow
+# with libraqm) and stored as finished pictures: the kernel needs no
+# shaping engine (decision D16). Order = enum phrase_id in kernel/ui/font.h.
+PHRASES = [
+    # name,                 size, text
+    ("PHRASE_HI_GREETING",   30, "नमस्ते"),
+    ("PHRASE_MR_GREETING",   30, "नमस्कार"),
+    ("PHRASE_HI_NAME",       16, "आपका नाम"),
+    ("PHRASE_MR_NAME",       16, "तुमचे नाव"),
+    ("PHRASE_PASSWORD",      16, "पासवर्ड"),
+    ("PHRASE_HI_ENTER",      16, "आगे बढ़ने के लिए Enter दबाएँ"),
+    ("PHRASE_MR_ENTER",      16, "पुढे जाण्यासाठी Enter दाबा"),
+    ("PHRASE_HINDI",         16, "हिन्दी"),
+    ("PHRASE_MARATHI",       16, "मराठी"),
+]
+PHRASES_OUT = ROOT / "kernel" / "ui" / "phrases.bin"
+DEVA_URL = BASE + "notosansdevanagari/NotoSansDevanagari%5Bwdth,wght%5D.ttf"
+DEVA_FILE = SRC / "NotoSansDevanagari-var.ttf"
+DEVA_LICENSE = BASE + "notosansdevanagari/OFL.txt"
+
+
+def make_phrases() -> None:
+    """phrases.bin: "BPH1", u32 count, per phrase u16 w, u16 h, u32 offset;
+    then w*h coverage bytes per phrase, rows top to bottom. Every phrase
+    of one size has the same height and baseline, so they line up."""
+    from PIL import Image, ImageDraw, ImageFont, features
+    if not features.check("raqm"):
+        raise SystemExit("Devanagari needs Pillow with libraqm (text shaping)")
+    if not DEVA_FILE.exists():
+        print("[fonts] downloading NotoSansDevanagari")
+        urllib.request.urlretrieve(DEVA_URL, DEVA_FILE)
+        urllib.request.urlretrieve(DEVA_LICENSE, SRC / "OFL-noto.txt")
+    heads, blob = bytearray(), bytearray()
+    for name, size, text in PHRASES:
+        f = ImageFont.truetype(str(DEVA_FILE), size, layout_engine=ImageFont.Layout.RAQM)
+        axes = f.get_variation_axes()
+        f.set_variation_by_axes([400 if str(a.get("name", b"")).lower().find("weight") >= 0
+                                 else a["default"] for a in axes])
+        asc, desc = f.getmetrics()
+        w = round(f.getlength(text, language="hi")) + 6
+        img = Image.new("L", (w, asc + desc), 0)
+        ImageDraw.Draw(img).text((1, asc), text, fill=255, font=f, anchor="ls", language="hi")
+        heads += struct.pack("<HHI", w, asc + desc, len(blob))
+        blob += img.tobytes()
+        print(f"[fonts] {name}: {w}x{asc + desc}")
+    out = b"BPH1" + struct.pack("<I", len(PHRASES)) + bytes(heads) + bytes(blob)
+    PHRASES_OUT.write_bytes(out)
+    (ROOT / "kernel" / "ui" / "phrases-OFL.txt").write_text(
+        "Noto Sans Devanagari, used in phrases.bin:\n\n"
+        + (SRC / "OFL-noto.txt").read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"[fonts] wrote {PHRASES_OUT.relative_to(ROOT)} ({len(out)} bytes)")
+
+
 def main() -> int:
     try:
         import PIL  # noqa: F401
     except ImportError:
         print("make_fonts.py needs Pillow: pip install pillow", file=sys.stderr)
         return 1
+    make_phrases()
+    if "--phrases-only" in sys.argv:
+        return 0
     fetch()
     heads, blob = [], bytearray()
     for name, kind, size, weight, line_h in FONTS:

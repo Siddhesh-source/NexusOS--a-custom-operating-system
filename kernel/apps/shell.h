@@ -5,7 +5,7 @@
  *
  *   help ls cd pwd cat echo mkdir rm touch cp mv tree head wc grep df
  *   clear whoami uptime mem cpus ps top kill run checks lockdemo
- *   crashdemo net ping host fetch about reboot logout
+ *   crashdemo why net ping host fetch about reboot logout
  *
  * Any command's output can go to a file: `ls > list.txt` replaces the
  * file, `echo more >> list.txt` adds to its end.

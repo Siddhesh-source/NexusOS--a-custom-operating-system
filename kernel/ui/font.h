@@ -13,8 +13,13 @@
  * If the data is missing or damaged, font_get() returns NULL and gfx
  * falls back to the built-in 8x8 font, so text never disappears.
  *
- * Limits: printable ASCII only (Devanagari comes in Phase 22); no
- * kerning; sizes fixed when the file is made. */
+ * Hindi and Marathi: Devanagari letters join and change shape, so whole
+ * phrases are shaped ahead of time by the same script (Noto Sans
+ * Devanagari, OFL) into phrases.bin, and drawn as finished pictures
+ * (gfx_phrase). There is no shaping engine in the kernel (decision D16).
+ *
+ * Limits: printable ASCII only for typed text; Devanagari only for the
+ * fixed phrases below; no kerning; sizes fixed when the files are made. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -47,8 +52,18 @@ struct font {
     struct glyph g[95];  /* 0x20..0x7E */
 };
 
-/* Check the font data; false (and NULL fonts) if it is damaged. */
+/* Fixed Hindi (HI) and Marathi (MR) phrases, in phrases.bin order. */
+enum phrase_id {
+    PHRASE_HI_GREETING, PHRASE_MR_GREETING, PHRASE_HI_NAME, PHRASE_MR_NAME, PHRASE_PASSWORD,
+    PHRASE_HI_ENTER, PHRASE_MR_ENTER, PHRASE_HINDI, PHRASE_MARATHI,
+    PHRASE_COUNT
+};
+
+/* Check the font data; false (and NULL fonts) if it is damaged. Also
+ * checks the phrases (missing or damaged phrases are simply not drawn). */
 bool font_init(void);
+/* A phrase's coverage picture (w x h bytes), or NULL. */
+const uint8_t *font_phrase(enum phrase_id id, uint16_t *w, uint16_t *h);
 const struct font *font_get(enum font_id id);
 const uint8_t *font_coverage(const struct font *f, const struct glyph *g);
 

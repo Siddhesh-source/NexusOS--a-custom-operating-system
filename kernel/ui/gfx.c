@@ -244,6 +244,25 @@ int32_t gfx_text_width(const char *s, enum font_id fid)
     return w;
 }
 
+int32_t gfx_phrase(int32_t x, int32_t y, enum phrase_id id, uint32_t rgb)
+{
+    uint16_t w, h;
+    const uint8_t *cov = font_phrase(id, &w, &h);
+    if (tgt == NULL || cov == NULL)
+        return 0;
+    struct gfx_rect box = gfx_rect(x, y, w, h), vis = gfx_intersect(box, clip);
+    for (int32_t py = vis.y; py < vis.y + vis.h; py++)
+        for (int32_t px = vis.x; px < vis.x + vis.w; px++)
+            put(px, py, rgb, cov[(py - y) * w + (px - x)]);
+    return w;
+}
+
+int32_t gfx_phrase_width(enum phrase_id id)
+{
+    uint16_t w = 0, h;
+    return font_phrase(id, &w, &h) != NULL ? w : 0;
+}
+
 int32_t gfx_line_height(enum font_id fid)
 {
     const struct font *f = font_get(fid);

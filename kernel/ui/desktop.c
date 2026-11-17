@@ -33,6 +33,8 @@ bool desktop_logged_in(void)
 
 /* ---- the login screen -------------------------------------------------------- */
 
+static enum login_lang lang;           /* kept across sign-ins */
+
 static struct {
     bool password;                      /* asking for the password now */
     char name[LOGIN_NAME_MAX + 1];
@@ -55,6 +57,43 @@ static void centred(int32_t y, const char *s, uint32_t rgb, enum font_id f)
     gfx_text((wm_back()->w - gfx_text_width(s, f)) / 2, y, s, rgb, f);
 }
 
+/* A line in the chosen language: the English text, or a Hindi or Marathi
+ * phrase (a little taller, so moved up 2 pixels to sit on the same line). */
+static void centred_lang(int32_t y, const char *en, enum phrase_id hi, enum phrase_id mr, uint32_t rgb)
+{
+    if (lang == LOGIN_ENGLISH) {
+        centred(y, en, rgb, FONT_SMALL);
+        return;
+    }
+    enum phrase_id id = lang == LOGIN_HINDI ? hi : mr;
+    gfx_phrase((wm_back()->w - gfx_phrase_width(id)) / 2, y - 2, id, rgb);
+}
+
+void login_set_language(enum login_lang l)
+{
+    lang = (unsigned)l <= LOGIN_MARATHI ? l : LOGIN_ENGLISH;
+    wm_damage_all();
+}
+
+enum login_lang login_language(void)
+{
+    return lang;
+}
+
+/* "F1   English  हिन्दी  मराठी", the one in use brighter. */
+static void draw_languages(int32_t y)
+{
+    const char *key = "F1", *en = "English";
+    int32_t gap = 18, kw = gfx_text_width(key, FONT_SMALL), ew = gfx_text_width(en, FONT_SMALL);
+    int32_t total = kw + gap + ew + gap + gfx_phrase_width(PHRASE_HINDI) + gap + gfx_phrase_width(PHRASE_MARATHI);
+    int32_t x = (wm_back()->w - total) / 2;
+    uint32_t on = COL_ON_DARK, off = COL_ON_DARK_MUTED;
+    x += gfx_text(x, y, key, COL_SAFFRON, FONT_SMALL) + gap;
+    x += gfx_text(x, y, en, lang == LOGIN_ENGLISH ? on : off, FONT_SMALL) + gap;
+    x += gfx_phrase(x, y - 2, PHRASE_HINDI, lang == LOGIN_HINDI ? on : off) + gap;
+    gfx_phrase(x, y - 2, PHRASE_MARATHI, lang == LOGIN_MARATHI ? on : off);
+}
+
 /* A lock screen on the wallpaper: the time, a round avatar with the
  * first letter of the name, and a soft name (or password) field. */
 void login_draw(void)
@@ -65,8 +104,14 @@ void login_draw(void)
     char clock[8] = "";
     if (rtc_time(&h, &m, &sec))
         ksnprintf(clock, sizeof(clock), "%02u:%02u", h, m);
-    centred(cy - 250, clock, COL_ON_DARK, FONT_DISPLAY);
-    centred(cy - 170, "BharatOS", COL_ON_DARK_MUTED, FONT_MEDIUM);
+    centred(cy - 270, clock, COL_ON_DARK, FONT_DISPLAY);
+    centred(cy - 190, "BharatOS", COL_ON_DARK_MUTED, FONT_MEDIUM);
+    /* Namaste (Hindi) and Namaskar (Marathi), always shown. */
+    int32_t g1 = gfx_phrase_width(PHRASE_HI_GREETING), g2 = gfx_phrase_width(PHRASE_MR_GREETING);
+    int32_t gx = cx - (g1 + 40 + g2) / 2;
+    gfx_phrase(gx, cy - 160, PHRASE_HI_GREETING, COL_ON_DARK);
+    gfx_round(gfx_rect(gx + g1 + 17, cy - 145, 6, 6), 3, COL_SAFFRON, 255);
+    gfx_phrase(gx + g1 + 40, cy - 160, PHRASE_MR_GREETING, COL_ON_DARK);
 
     struct gfx_rect av = gfx_rect(cx - 40, cy - 100, 80, 80);
     gfx_round(gfx_grow(av, 1), 41, 0xFFFFFF, 40);
@@ -76,11 +121,18 @@ void login_draw(void)
         gfx_text(cx - gfx_text_width(initial, FONT_HEADING) / 2, av.y + 25, initial, COL_SURFACE, FONT_HEADING);
 
     char label[48];
-    if (ls.password)
+    if (ls.password && lang != LOGIN_ENGLISH) {
+        /* "पासवर्ड: name" */
+        ksnprintf(label, sizeof(label), ": %s", ls.name);
+        int32_t pw = gfx_phrase_width(PHRASE_PASSWORD), x = cx - (pw + gfx_text_width(label, FONT_SMALL)) / 2;
+        gfx_phrase(x, cy + 2, PHRASE_PASSWORD, COL_ON_DARK_MUTED);
+        gfx_text(x + pw, cy + 4, label, COL_ON_DARK_MUTED, FONT_SMALL);
+    } else if (ls.password) {
         ksnprintf(label, sizeof(label), "Password for %s", ls.name);
-    else
-        strlcpy(label, "Your name", sizeof(label));
-    centred(cy + 4, label, COL_ON_DARK_MUTED, FONT_SMALL);
+        centred(cy + 4, label, COL_ON_DARK_MUTED, FONT_SMALL);
+    } else {
+        centred_lang(cy + 4, "Your name", PHRASE_HI_NAME, PHRASE_MR_NAME, COL_ON_DARK_MUTED);
+    }
     struct gfx_rect field = gfx_rect(cx - 150, cy + 28, 300, 42);
     gfx_round(gfx_grow(field, 1), 22, 0xFFFFFF, 50);
     gfx_round(field, 21, COL_WALL_TOP, 200);
@@ -98,7 +150,8 @@ void login_draw(void)
     if (ls.msg[0] != '\0')
         centred(cy + 84, ls.msg, 0xF0A096, FONT_SMALL);
     else
-        centred(cy + 84, "Press Enter to sign in", COL_ON_DARK_MUTED, FONT_SMALL);
+        centred_lang(cy + 84, "Press Enter to sign in", PHRASE_HI_ENTER, PHRASE_MR_ENTER, COL_ON_DARK_MUTED);
+    draw_languages(cy + 124);
 }
 
 static void enter_desktop(void)
@@ -119,7 +172,9 @@ static void login_key(uint16_t key)
     char *buf = ls.password ? ls.pass : ls.name;
     size_t cap = ls.password ? sizeof(ls.pass) : sizeof(ls.name), n = strlen(buf);
     wm_damage_all();
-    if (key == '\b' && n > 0) {
+    if (key == INPUT_KEY_F1) {
+        login_set_language((enum login_lang)((lang + 1) % 3));
+    } else if (key == '\b' && n > 0) {
         buf[n - 1] = '\0';
     } else if (key == 0x1B) {
         login_reset();
