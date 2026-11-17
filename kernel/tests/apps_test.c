@@ -200,6 +200,59 @@ static void test_code(void)
           "each kind of file opens in the app that suits it");
 }
 
+static void test_player_playlist(struct window *w)
+{
+    unsigned at = 9;
+    const char *name = "", *msg = "";
+    CHECK(player_playlist(w, &at, &name, NULL) == 2 && at == 0 && strcmp(name, "bunny.bvid") == 0,
+          "the playlist holds every video in /media, in name order");
+    desktop_key('n');
+    player_playlist(w, NULL, &name, NULL);
+    CHECK(strcmp(name, "waves.bvid") == 0 && strstr(w->title, "waves") != NULL && player_frame(w, NULL, NULL) == 0,
+          "N plays the next video from its start");
+    desktop_key('n');
+    player_playlist(w, NULL, &name, NULL);
+    CHECK(strcmp(name, "bunny.bvid") == 0, "after the last video comes the first");
+    desktop_key('p');
+    desktop_key(INPUT_KEY_END);
+    sched_sleep(SCHED_TIMER_HZ / 4);
+    wm_animate();
+    player_playlist(w, NULL, &name, NULL);
+    CHECK(strcmp(name, "bunny.bvid") == 0 && player_frame(w, NULL, NULL) < 3,
+          "when a video ends the next one starts");
+    struct gfx_rect before = w->r;
+    desktop_key('f');
+    wm_compose();
+    CHECK(w->full && w->r.x == 0 && w->r.w == wm_back()->w && gfx_get(wm_back(), 2, 2) == 0,
+          "F shows the video full screen, over the top bar");
+    desktop_key(0x1B);
+    CHECK(!w->full && w->r.x == before.x && w->r.y == before.y && w->r.w == before.w,
+          "Esc leaves full screen and the window goes back");
+    wm_compose();
+    fs_write_file("/media/broken.bvid", "BVID not really", 15, false);
+    struct window *v = wm_open(&app_player, "/media/bunny.bvid");
+    desktop_key('p');
+    player_playlist(v, NULL, &name, &msg);
+    CHECK(strcmp(name, "waves.bvid") == 0 && strstr(msg, "Skipped broken.bvid") != NULL,
+          "a broken video in the playlist is skipped with a message");
+    wm_close(v);
+    char path[FS_PATH_MAX];
+    for (unsigned i = 0; i < PLAYER_LIST_MAX; i++) {
+        ksnprintf(path, sizeof(path), "/media/zz%u.bvid", i);
+        fs_write_file(path, "x", 1, false);
+    }
+    v = wm_open(&app_player, "/media/bunny.bvid");
+    CHECK(v != NULL && player_playlist(v, NULL, NULL, NULL) == PLAYER_LIST_MAX,
+          "the playlist stops at its limit");
+    wm_close(v);
+    for (unsigned i = 0; i < PLAYER_LIST_MAX; i++) {
+        ksnprintf(path, sizeof(path), "/media/zz%u.bvid", i);
+        fs_unlink(path);
+    }
+    fs_unlink("/media/broken.bvid");
+    wm_focus(w);
+}
+
 static void test_player(void)
 {
     st_section("Player");
@@ -235,6 +288,7 @@ static void test_player(void)
     CHECK(player_frame(w, NULL, NULL) > f2, "Right jumps forward");
     desktop_key(INPUT_KEY_HOME);
     CHECK(player_frame(w, NULL, NULL) == 0, "Home goes back to the start");
+    test_player_playlist(w);
     wm_close(w);
 }
 

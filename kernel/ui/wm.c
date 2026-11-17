@@ -184,6 +184,8 @@ void wm_focus(struct window *w)
     order[nwin - 1] = w;
     wm_redraw(old);                         /* its shadow and title go quiet */
     wm_redraw(w);
+    if ((old != NULL && old->full) || w->full)
+        wm_damage_all();                    /* the top bar and dock come or go */
     topbar_refresh();                       /* the top bar names the focused app */
 }
 
@@ -201,6 +203,20 @@ void wm_move(struct window *w, int32_t x, int32_t y)
     w->r.x = x;
     w->r.y = y;
     wm_damage(outer(w));
+}
+
+void wm_fullscreen(struct window *w, bool on)
+{
+    if (w == NULL || !w->used || w->full == on)
+        return;
+    if (on) {
+        w->saved = w->r;
+        w->r = gfx_rect(0, -UI_TITLE_H, back.w, back.h + UI_TITLE_H);
+    } else {
+        w->r = w->saved;
+    }
+    w->full = on;
+    wm_damage_all();
 }
 
 void wm_set_title(struct window *w, const char *title)
@@ -475,7 +491,8 @@ bool wm_compose(void)
         backdrop();
     for (unsigned i = 0; i < nwin; i++)
         draw_window(order[i], i == nwin - 1);
-    if (napps > 0) {
+    struct window *top = wm_focused();
+    if (napps > 0 && (top == NULL || !top->full)) {
         draw_topbar();
         draw_dock();
     }
@@ -536,7 +553,8 @@ void wm_mouse(int32_t x, int32_t y, uint8_t b)
     if (!press)
         return;
     struct window *w = window_at(x, y);
-    if (napps > 0 && (y < UI_TOPBAR_H || (w == NULL && gfx_inside(dock_rect(), x, y)))) {
+    bool bars = wm_focused() == NULL || !wm_focused()->full;
+    if (napps > 0 && bars && (y < UI_TOPBAR_H || (w == NULL && gfx_inside(dock_rect(), x, y)))) {
         topbar_click(x, y);
         return;
     }

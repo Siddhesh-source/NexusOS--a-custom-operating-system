@@ -1,3 +1,6 @@
 Big Buck Bunny (c) copyright 2008, Blender Foundation
 www.bigbuckbunny.org - licensed under Creative Commons Attribution 3.0
 10 seconds, 192x108, 12 frames a second. Open it in the Player app.
+
+waves.bvid: coloured waves under a sunrise, drawn by scripts/make_video.py
+(no outside footage). 3 seconds, 192x108, 12 frames a second.

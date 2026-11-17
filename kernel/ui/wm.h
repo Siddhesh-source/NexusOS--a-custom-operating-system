@@ -53,6 +53,8 @@ struct window {
     struct gfx_rect r;             /* the whole window, title bar included */
     char title[48];
     void *st;                      /* the app's own state */
+    bool full;                     /* full screen: no title bar, top bar or dock */
+    struct gfx_rect saved;         /* where it was before full screen */
 };
 
 struct wm_stats {
@@ -82,6 +84,10 @@ struct window *wm_find(const struct app *a);
 struct window *wm_show(const struct app *a);
 void wm_move(struct window *w, int32_t x, int32_t y);    /* kept on screen */
 void wm_set_title(struct window *w, const char *title);
+/* Full screen on or off: the body covers the whole screen (the title bar
+ * moves just off the top) and the top bar and dock are hidden while it
+ * is the focused window. Off puts it back where it was. */
+void wm_fullscreen(struct window *w, bool on);
 
 void wm_damage(struct gfx_rect r);
 void wm_damage_all(void);

@@ -71,6 +71,10 @@ unsigned code_tabs(struct window *w, unsigned *active, size_t *cursor, const cha
 bool player_parse(const uint8_t *d, size_t size, uint16_t *w, uint16_t *h, uint16_t *fps,
                   uint16_t *frames);
 unsigned player_frame(struct window *w, unsigned *shown, bool *playing);
+/* Player: videos in the playlist, the one playing, its name and the
+ * message line ("" or why a video was skipped). */
+#define PLAYER_LIST_MAX 16
+unsigned player_playlist(struct window *w, unsigned *at, const char **name, const char **msg);
 
 /* Browser: whether the page shows `text`; its address and link count;
  * follow link `i`; go to an address; go back. */
