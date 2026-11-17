@@ -232,7 +232,7 @@ def find_ovmf() -> tuple[Path | None, Path | None]:
 
 
 def run_qemu(image: Path, *, uefi: bool = False, window: bool = False) -> int:
-    cmd = [TOOLS["qemu"], "-m", "512M", "-smp", str(SMP),
+    cmd = [TOOLS["qemu"], "-m", "2G", "-smp", str(SMP), "-nic", "user,model=e1000",
            "-drive", f"file={image},format=raw,media=disk,if=ide",
            "-no-reboot", "-no-shutdown"]
     if window and not uefi:
@@ -268,7 +268,7 @@ def run_debug(image: Path) -> int:
     print(f"          lldb {KERNEL_ELF.relative_to(ROOT).as_posix()} "
           "-o \"gdb-remote 1234\" -o \"breakpoint set -n kernel_main\" -o continue")
     print("[debug] Serial output appears here. Quit QEMU: Ctrl+A then X.", flush=True)
-    cmd = [TOOLS["qemu"], "-m", "512M", "-smp", str(SMP),
+    cmd = [TOOLS["qemu"], "-m", "2G", "-smp", str(SMP), "-nic", "user,model=e1000",
            "-drive", f"file={image},format=raw,media=disk,if=ide",
            "-nographic", "-no-reboot", "-no-shutdown",
            "-s", "-S"]          # -s: gdb server on :1234, -S: start paused

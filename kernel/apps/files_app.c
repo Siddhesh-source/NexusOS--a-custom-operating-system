@@ -1,9 +1,13 @@
-/* Files: one folder at a time, as a list. Click a row to select it,
- * click it again (or press Enter) to open it: a folder opens in place, a
- * file opens in the text editor. Up goes to the parent folder. New file
- * and New folder ask for a name on the bottom line; Delete removes the
- * selected file or empty folder. Keys: arrows, Enter, Backspace (up),
- * n (new file), d (new folder), Delete. */
+/* Files: one folder at a time, as a list, with "Places" on the left
+ * (Home, Code, Videos, Web pages, Documents, the whole disk) and how full
+ * the disk is under them. Click a row to select it, click it again (or
+ * press Enter) to open it: a folder opens in place, a file opens in the
+ * app that suits it (a video in Player, a web page in Browser, code in
+ * Code, anything else in the text editor). Up (or Backspace) closes the
+ * folder and goes back to the one holding it. New file and New folder ask
+ * for a name on the bottom line; Delete removes the selected file or empty
+ * folder. Keys: arrows, Enter, Backspace (up), n (new file), d (new
+ * folder), Delete. */
 
 #include "apps.h"
 #include "theme.h"
@@ -17,6 +21,13 @@
 #define ROW_H     32
 #define LIST_ROWS 12
 #define LIST_Y    (UI_BAR_H + 36)        /* first row, from the body top */
+#define SIDE      176                    /* the Places column */
+#define PLACE_Y   (UI_BAR_H + 30)
+#define PLACE_H   30
+
+static const char *const place_names[] = { "Home", "Code", "Videos", "Web pages", "Documents", "Whole disk" };
+static const char *const place_paths[] = { NULL, "/code", "/media", "/www", "/docs", "/" };
+#define PLACES 6
 
 enum { NORMAL, NEW_FILE, NEW_FOLDER };
 
@@ -83,7 +94,7 @@ static void open_selected(struct window *w)
         return;
     }
     char p[FS_PATH_MAX];
-    if (child(f, e->name, p) && wm_open(&app_editor, p) == NULL)
+    if (child(f, e->name, p) && wm_open(app_for_file(p), p) == NULL)
         ksnprintf(f->msg, sizeof(f->msg), "Cannot open %s (too many windows?)", e->name);
 }
 
@@ -129,6 +140,37 @@ static void files_draw(struct window *w, struct gfx_rect body)
 {
     struct files *f = w->st;
     ui_buttons(body, files_buttons, 5, -1, true, -1, -1);
+    /* Places and the disk */
+    struct gfx_rect side = gfx_rect(body.x + 8, body.y + UI_BAR_H, SIDE - 16, body.h - UI_BAR_H - 56);
+    gfx_round(side, UI_RADIUS_SM, COL_SURFACE_2, 255);
+    gfx_text(side.x + 12, side.y + 8, "PLACES", COL_MUTED, FONT_SMALL);
+    for (unsigned i = 0; i < PLACES; i++) {
+        char home[FS_PATH_MAX];
+        const char *pp = place_paths[i];
+        if (pp == NULL) {
+            ksnprintf(home, sizeof(home), "/home/%s", desktop_user());
+            pp = home;
+        }
+        int32_t py = body.y + PLACE_Y + (int32_t)i * PLACE_H;
+        if (strcmp(f->cwd, pp) == 0)
+            gfx_round(gfx_rect(side.x + 4, py, side.w - 8, PLACE_H - 4), UI_RADIUS_SM, COL_ACCENT_SOFT, 255);
+        gfx_text(side.x + 14, py + 5, place_names[i], COL_TEXT, FONT_UI);
+    }
+    struct fs_usage u;
+    fs_get_usage(&u);
+    int32_t dy = side.y + side.h - 74;
+    gfx_text(side.x + 12, dy, "DISK", COL_MUTED, FONT_SMALL);
+    gfx_text(side.x + 12, dy + 18, "BharatOS files (RAM)", COL_TEXT, FONT_SMALL);
+    struct gfx_rect bar = gfx_rect(side.x + 12, dy + 38, side.w - 24, 6);
+    gfx_round(bar, 3, COL_LINE, 255);
+    int32_t used = u.max_bytes ? (int32_t)((uint64_t)bar.w * u.bytes / u.max_bytes) : 0;
+    gfx_round(gfx_rect(bar.x, bar.y, used < 4 ? 4 : used, bar.h), 3, COL_TEAL, 255);
+    char du[48];
+    ksnprintf(du, sizeof(du), "%lu KB of %lu MB used", u.bytes / 1024, u.max_bytes >> 20);
+    gfx_text(side.x + 12, dy + 50, du, COL_MUTED, FONT_SMALL);
+
+    body.x += SIDE - 8;
+    body.w -= SIDE - 8;
     int32_t x = body.x + UI_PAD, y = body.y + UI_BAR_H;
     gfx_text(x, y + 4, f->cwd, COL_MUTED, FONT_MEDIUM);
     y = body.y + LIST_Y;
@@ -159,6 +201,9 @@ static void files_draw(struct window *w, struct gfx_rect body)
                  COL_MUTED, FONT_SMALL);
     }
     int32_t by = body.y + body.h - 44;
+    body.x -= SIDE - 8;
+    body.w += SIDE - 8;
+    x = body.x + UI_PAD;
     gfx_fill(gfx_rect(body.x, by - 8, body.w, 1), COL_LINE);
     if (f->mode != NORMAL) {
         const char *label = f->mode == NEW_FILE ? "New file name" : "New folder name";
@@ -227,6 +272,17 @@ static void files_click(struct window *w, int32_t x, int32_t y)
     int hit = ui_buttons(gfx_rect(0, 0, b.w, b.h), files_buttons, 5, -1, false, x, y);
     if (hit >= 0) {
         action(w, hit);
+    } else if (x < SIDE) {
+        if (y >= PLACE_Y && y < PLACE_Y + PLACES * PLACE_H) {
+            unsigned i = (unsigned)(y - PLACE_Y) / PLACE_H;
+            char home[FS_PATH_MAX];
+            const char *pp = place_paths[i];
+            if (pp == NULL) {
+                ksnprintf(home, sizeof(home), "/home/%s", desktop_user());
+                pp = home;
+            }
+            go(f, pp);
+        }
     } else if (y >= LIST_Y) {
         unsigned i = f->top + (unsigned)(y - LIST_Y) / ROW_H;
         if (i < f->n && i < f->top + LIST_ROWS) {
@@ -278,7 +334,7 @@ const char *files_folder(struct window *w)
 
 const struct app app_files = {
     .name = "Files",
-    .w = 600,
+    .w = 600 + SIDE,
     .h = LIST_Y + LIST_ROWS * ROW_H + 60,
     .tile = 0xEFE3CC,
     .icon = icon_files,

@@ -133,7 +133,7 @@ static void test_limits(void)
     bool made = big != NULL;
     if (made)
         memset(big, 'z', FS_FILE_MAX + 1);
-    CHECK(made && fs_write_file("/big", big, FS_FILE_MAX, false) == FS_OK, "a file of exactly 256 KiB is allowed");
+    CHECK(made && fs_write_file("/big", big, FS_FILE_MAX, false) == FS_OK, "a file of exactly the size limit (4 MiB) is allowed");
     CHECK(made && fs_write_file("/big", "!", 1, true) == FS_ERR_TOO_BIG, "one more byte is refused (too big)");
     CHECK(made && fs_write_file("/big2", big, FS_FILE_MAX + 1, false) == FS_ERR_TOO_BIG,
           "writing 256 KiB + 1 at once is refused");

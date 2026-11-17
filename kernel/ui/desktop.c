@@ -13,7 +13,8 @@
 #include "rtc.h"
 
 const struct app *const desktop_apps[] = {
-    &app_terminal, &app_files, &app_monitor, &app_health, &app_about,
+    &app_terminal, &app_files, &app_code, &app_browser, &app_player,
+    &app_monitor, &app_health, &app_about,
 };
 const unsigned desktop_app_count = sizeof(desktop_apps) / sizeof(desktop_apps[0]);
 
@@ -209,6 +210,8 @@ static int64_t desktop_main(void *arg)
         while (input_desktop_poll(&ev))
             handle(&ev);
         tour_tick();
+        if (logged_in)
+            wm_animate();
         uint64_t now = sched_ticks();
         if (now >= next_tick) {
             if (logged_in)

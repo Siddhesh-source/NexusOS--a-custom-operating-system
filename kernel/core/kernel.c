@@ -41,6 +41,8 @@
 #include "console.h"
 #include "desktop.h"
 #include "desktop_test.h"
+#include "apps_test.h"
+#include "net.h"
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -231,7 +233,7 @@ void kernel_main(void)
 
     serial_puts("\n============================================\n");
     serial_puts("           B H A R A T   O S\n");
-    serial_puts("  Phase 11: V1 desktop (windows, apps, demo)\n");
+    serial_puts("  V1 desktop: apps, network, video, code\n");
     serial_puts("============================================\n\n");
 
     serial_puts("[boot] CPU entered long mode (64-bit).\n");
@@ -357,6 +359,13 @@ void kernel_main(void)
 
     /* Phase 11: graphics, windows and the desktop apps, drawn in memory. */
     bool desktop_ok = desktop_run_tests();
+    splash_step("Starting the network");
+
+    /* The network card and stack, then the newer apps (Code, Player,
+     * Browser), the extra shell commands and the network checks. */
+    if (!net_init())
+        kprintf("[net] no network card found; the network is off\n");
+    bool apps_ok = apps_run_tests();
     splash_step("Ready");
 
     serial_puts("\n[ok] Kernel started successfully.\n");
@@ -404,6 +413,10 @@ void kernel_main(void)
         serial_puts("[ok] Phase 11 desktop verified.\n");
     else
         serial_puts("[FAIL] Phase 11 desktop tests reported failures.\n");
+    if (apps_ok)
+        serial_puts("[ok] Network and apps verified.\n");
+    else
+        serial_puts("[FAIL] Network and apps tests reported failures.\n");
     {
         unsigned passed, failed;
         selftest_totals(&passed, &failed);

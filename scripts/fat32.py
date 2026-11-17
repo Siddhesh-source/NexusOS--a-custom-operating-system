@@ -286,8 +286,11 @@ def make_bundle(bundle_dir: Path) -> bytes:
                 info.mode = 0o755
                 tar.addfile(info)
             else:
-                # Unix line ends, even from a Windows checkout.
-                data = path.read_bytes().replace(b"\r\n", b"\n")
+                # Unix line ends, even from a Windows checkout (text
+                # only: a binary file such as a video is kept as it is).
+                data = path.read_bytes()
+                if b"\0" not in data:
+                    data = data.replace(b"\r\n", b"\n")
                 info.size = len(data)
                 info.mode = 0o644
                 tar.addfile(info, io.BytesIO(data))

@@ -1,0 +1,28 @@
+<html>
+<head><title>BharatOS start page</title></head>
+<body>
+<h1>Welcome to the BharatOS Browser</h1>
+<p>This browser is written from scratch inside BharatOS. Pages come over
+the BharatOS network stack (its own TCP/IP, written in C), or from files
+on this machine.</p>
+
+<h2>Try these</h2>
+<ul>
+<li><a href="http://example.com/">example.com</a> - a real page from the internet (over plain HTTP)</li>
+<li><a href="http://neverssl.com/">neverssl.com</a> - another site that still speaks plain HTTP</li>
+<li><a href="http://10.0.2.2:8000/">your own PC</a> - run <b>python -m http.server 8000</b> on your PC first</li>
+<li><a href="guide.html">How BharatOS works</a> - a page stored inside BharatOS</li>
+</ul>
+
+<h2>Keys</h2>
+<ul>
+<li>Ctrl+L, or click the address bar: type an address, then Enter</li>
+<li>Up, Down, Page Up, Page Down, Space: scroll</li>
+<li>Backspace or the Back button: the page before</li>
+</ul>
+
+<h2>What it cannot do yet</h2>
+<p>Secure (https) sites need encryption (TLS), which comes later. Pictures,
+styles and scripts are not shown: you get the words and the links.</p>
+</body>
+</html>

@@ -37,7 +37,9 @@ static bool term_open(struct window *w, const char *arg)
     w->st = t;
     shell_init(&t->sh, desktop_user(), textbuf_out, &t->tb);
     le_init(&t->le, textbuf_out, &t->tb);
-    textbuf_puts(&t->tb, "BharatOS terminal. Type 'help' to see the commands.\n");
+    t->le.complete = shell_complete;
+    t->le.cctx = &t->sh;
+    textbuf_puts(&t->tb, "BharatOS terminal. Type 'help' to see the commands; Tab completes names.\n");
     prompt(t);
     return true;
 }

@@ -479,7 +479,7 @@ static struct window *window_at(int32_t x, int32_t y)
 
 void wm_key(uint16_t key)
 {
-    if (key >= INPUT_KEY_F1 && key < INPUT_KEY_F1 + napps && key < INPUT_KEY_F1 + 5) {
+    if (key >= INPUT_KEY_F1 && key < INPUT_KEY_F1 + napps && key < INPUT_KEY_F1 + 8) {
         wm_show(apps[key - INPUT_KEY_F1]);
         return;
     }
@@ -530,6 +530,13 @@ void wm_mouse(int32_t x, int32_t y, uint8_t b)
     struct gfx_rect body = wm_body(w);
     if (gfx_inside(body, x, y) && w->app->click != NULL)
         w->app->click(w, x - body.x, y - body.y);
+}
+
+void wm_animate(void)
+{
+    for (unsigned i = 0; i < nwin; i++)
+        if (order[i]->app->anim != NULL)
+            order[i]->app->anim(order[i]);
 }
 
 void wm_tick(void)

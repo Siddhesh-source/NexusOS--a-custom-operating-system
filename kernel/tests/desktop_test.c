@@ -185,8 +185,8 @@ static void test_windows(void)
     click(item.x + 4, item.y + 4);
     CHECK(f != NULL && wm_focused() == f && wm_find(&app_files) == f,
           "the dock opens an app, and a second click does not open it twice");
-    wm_key(INPUT_KEY_F1 + 2);
-    CHECK(wm_focused() != NULL && wm_focused()->app == &app_monitor, "F3 opens the Monitor");
+    wm_key(INPUT_KEY_F1 + 5);
+    CHECK(wm_focused() != NULL && wm_focused()->app == &app_monitor, "F6 opens the Monitor");
     wm_key(23);
     CHECK(wm_find(&app_monitor) == NULL, "Ctrl+W closes the focused window");
 }

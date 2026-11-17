@@ -270,3 +270,17 @@ uint32_t gfx_get(const struct gfx_surface *s, int32_t x, int32_t y)
         return 0;
     return gfx_unpack(s->px[(int64_t)y * s->stride + x]);
 }
+
+void gfx_image8(int32_t x, int32_t y, const uint8_t *idx, int32_t w, int32_t h, int32_t scale,
+                const uint32_t *packed)
+{
+    if (tgt == NULL || idx == NULL || packed == NULL || w <= 0 || h <= 0 || scale <= 0)
+        return;
+    struct gfx_rect r = gfx_intersect(gfx_rect(x, y, w * scale, h * scale), clip);
+    for (int32_t py = r.y; py < r.y + r.h; py++) {
+        const uint8_t *row = idx + (int64_t)((py - y) / scale) * w;
+        uint32_t *dst = at(r.x, py);
+        for (int32_t px = r.x; px < r.x + r.w; px++)
+            *dst++ = packed[row[(px - x) / scale]];
+    }
+}

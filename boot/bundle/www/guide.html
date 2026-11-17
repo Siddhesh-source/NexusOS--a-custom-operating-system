@@ -1,0 +1,29 @@
+<html>
+<head><title>How BharatOS works</title></head>
+<body>
+<h1>How BharatOS works</h1>
+<p>BharatOS is a whole operating system written from scratch: no Linux,
+no borrowed kernel. Everything you see on this desktop is drawn by it.</p>
+
+<h2>The parts</h2>
+<ul>
+<li><b>Memory</b>: a buddy allocator for pages, slab caches for small objects, and copy-on-write.</li>
+<li><b>Threads</b>: a scheduler with one queue per CPU that steals work when a CPU is idle.</li>
+<li><b>Safety</b>: a lock-order checker, guard pages, and crash reports with function names.</li>
+<li><b>Files</b>: folders and files in memory, filled at boot from a bundle on the disk.</li>
+<li><b>Network</b>: its own driver for the Intel e1000 card, plus ARP, IP, ICMP, UDP, DNS, TCP and HTTP.</li>
+<li><b>Desktop</b>: windows, a dock, and the apps: Terminal, Files, Code, Browser, Player, Monitor, Health.</li>
+</ul>
+
+<h2>Checks itself</h2>
+<p>Every boot runs hundreds of self-checks inside the kernel. The Health
+app shows the result. Type <b>checks</b> in the Terminal to run them again.</p>
+
+<pre>
+  boot  ->  self-checks  ->  login  ->  desktop
+             (hundreds)       (your name)
+</pre>
+
+<p><a href="home.html">Back to the start page</a></p>
+</body>
+</html>
