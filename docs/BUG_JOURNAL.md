@@ -305,3 +305,32 @@ New entries go at the end. Entries 1–7 come from Phases 2–5 (see
   (bad name, password asked for and refused, a good name). The boot test
   logs in on both. A test that forces both at the same instant is left
   for the Phase 12 fuzzing.
+
+### 22. A video in the boot bundle would have been silently corrupted (V1 extras)
+- **Symptom:** none yet in the kernel: caught while adding the first
+  binary file (the Player's video) to `boot/bundle/`.
+- **How found:** reading `scripts/fat32.py` before adding the file: the
+  bundle writer turned every CR LF pair into LF in *every* file, so a
+  Windows checkout would get text with Unix line ends.
+- **Root cause:** the rule was meant for text only, but binary data
+  contains the bytes 0x0D 0x0A by chance; the video would have lost bytes
+  and every later frame would have been shifted.
+- **Fix:** only files without a 0 byte are treated as text; binary files
+  are copied unchanged. `.gitattributes` marks `*.bvid` and `*.bin` as
+  binary so git never changes them either.
+- **Guarding test:** the Player self-tests parse the bundled video's
+  header and check that every frame lies inside the file (`player_parse`),
+  then play it.
+
+### 23. Escape sequences mangled by a shell here-document (tooling)
+- **Symptom:** patches applied through a shell here-document produced C
+  with a raw NUL byte and a string broken over two lines.
+- **How found:** the boot test's output showed a broken `kprintf` line,
+  and `grep` reported a "binary file" in `browser_app.c`.
+- **Root cause:** `\n` and `\0` inside the quoted here-document were
+  expanded before Python saw them (most likely by a command-rewriting
+  hook in the shell); plain `cat` here-documents were not affected.
+- **Fix:** patches with escapes are written to a script file first, then
+  run; every touched file was checked for stray control characters.
+- **Guarding test:** zero-warning build (a NUL in a character literal
+  breaks it) and the boot self-tests that print through the changed lines.

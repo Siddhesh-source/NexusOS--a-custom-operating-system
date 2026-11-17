@@ -254,6 +254,7 @@ boot, bad-input tests, a one-minute demo, and docs. **New rules:**
 | 9 | Multi-core ✅ done | concurrency | L |
 | 10 | V1 core: input, files, login, terminal ✅ done | demo | M |
 | 11 | V1 desktop and demo ✅ done | demo, all USPs visible | M |
+| 11+ | V1 extras ✅ done: 2 GB RAM, network stack (e1000, ARP, IPv4, ICMP, UDP, DNS, TCP, HTTP), Browser, Player, Code, Files places, Tab completion (see `QUICK_WINS.md`, `FINAL.md`, `docs/phases/phase-11-extras-apps-network.md`) | demo | M |
 | **12** | **V1 hardening: thorough tests, fixes, polish** | quality | M |
 | 13 (was 10) | User mode, handles and async rings | security, performance | L |
 | 14 (was 11) | Microkernel IPC and services | architecture | L |
@@ -261,7 +262,7 @@ boot, bad-input tests, a one-minute demo, and docs. **New rules:**
 | 16 (was 13) | Drivers as services | architecture | L |
 | 17 (was 14) | BharatFS: crash-safe, versions, transactions (replaces ramfs) | USP 3, storage, testing | XL |
 | 18 (was 15) | Permissions and verified boot | USP 1, 4, security | M |
-| 19 (was 16) | Networking (Rust TCP/IP) | networking | L |
+| 19 (was 16) | Networking as a service: move the working V1 stack (C, in the kernel, D39) out to a user-mode service; HTTPS (BearSSL), DHCP; Rust rewrite optional | networking | L |
 | 20 (was 17) | Resume, replay and live migration | USP 3, distributed, debugging | XL |
 | 21 (was 18) | Desktop polish and WebAssembly apps (builds on the V1 desktop) | all USPs visible | L |
 | 22 (was 19) | Made for Bharat and real hardware | USP 5 | L |
@@ -811,6 +812,7 @@ kernel/fs/         ramfs and the boot bundle loader  (Ph 10, created)
 kernel/apps/       V1 apps as kernel threads: console, shell (Ph 10, created),
                    desktop apps (Ph 11)
 kernel/ui/         graphics, splash, window manager, desktop, tour (Ph 11, created)
+kernel/net/        e1000 driver and the V1 TCP/IP stack (V1 extras, done)
 kernel/obj/        objects, handle tables            (Ph 13)
 kernel/ring/       async rings                       (Ph 10)
 kernel/ipc/        channels, shared memory           (Ph 11)
@@ -895,6 +897,10 @@ operation, ring batch of 64, IPC round trip, page fault, 4 KiB file read
 | D36 | Desktop draws everything into a back buffer and copies one damage rectangle (the union of all changes) to the screen, redrawing every layer clipped to it | simplest design that never shows half-drawn windows; a pointer move costs two tiny redraws | a buffer per window (memory, compositing code); a list of damage rectangles | far-apart changes every frame show up in profiles |
 | D37 | V1 apps run on the desktop thread, one event at a time; the tour drives them through the same key path | no locking inside the window manager or apps; the tour tests the real paths | a thread per window (locks everywhere) | apps move to user mode (Phase 13) |
 | D38 | Desktop redesign ("Midnight and ivory"): smooth fonts rendered ahead of time from IBM Plex (OFL) into a checked-in file linked as data; rounded windows, soft shadows, a dock; all blending in integer maths | the 8x8 BIOS font made V1 look 90s; pre-rendered coverage gives smooth text with no font engine in the kernel and no new build dependency (Pillow only to regenerate) | a TrueType rasteriser in the kernel; keeping bitmap fonts | sizes or scripts beyond ASCII are needed (Devanagari, Phase 22) |
+| D39 | V1 network stack in C inside the kernel, polled (no interrupts), fixed QEMU addresses, one lock; Phase 19 moves it to a service | a browser and `ping` in days instead of waiting for user mode, IPC and drivers-as-services; polling is simple and fast enough for one user | Rust stack in user mode first (blocked on Phases 13–16); interrupt-driven receive | more than one network user at once, or real hardware needing DHCP and interrupts |
+| D40 | Native Browser, Player and Code apps instead of porting Chrome, VLC and VS Code | the real apps need a full Linux/Windows environment (C library, dynamic linking, threads, GPU, fonts, audio) and millions of lines; native apps give the same demo in a few thousand lines we test at every boot | porting now (impossible before user mode and a C library) | user mode and a C library exist: port small open-source apps (NetSurf, Lua, a small decoder) per `FINAL.md` |
+| D41 | Video as `.bvid`: one 256-colour palette, raw 8-bit frames, frame picked by the clock | no codec in the kernel; a table lookup per pixel; keeps speed when frames are skipped; the clip (Big Buck Bunny, CC BY) is converted once by `scripts/make_video.py` | MJPEG or MPEG-1 decoder in the kernel | longer clips or sound are wanted (port a decoder in user mode) |
+| D42 | Kernel size budget raised from 17,000 to 21,500 lines; QEMU RAM from 512 MB to 2 GB; ramfs limits to 4 MiB a file and 32 MiB in all | the network stack (about 1,100 lines) and three apps (about 1,500) are planned features, not bloat; the video and pages need room | splitting apps out now (needs user mode) | apps move to user mode (Phase 13+), which takes them out of the kernel count |
 | D27 | Boot tests run QEMU's CPUs on one host thread (`thread=single`) | results do not depend on how busy the host is; parallel runs remain a manual stress and the bench mode | `thread=multi` in every test (flaky timing checks) | CI gets KVM |
 | D22 | Keep the buddy allocator even though a next-fit bitmap is faster for single pages (16 vs 37 cycles natively) | contiguous blocks, per-page reference counts for COW, steady under fragmentation; a 64-page hot cache covers the common case | keep the bitmap | single-page allocation shows up in profiles (per-CPU caches; not needed in Phase 9: the page allocator is not on the switch path, revisit with user processes) |
 

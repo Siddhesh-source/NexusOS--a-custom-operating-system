@@ -35,7 +35,7 @@ python build.py run                 # boot in QEMU (BIOS), serial in terminal; q
 python build.py run --window        # same, plus a QEMU window showing the screen (PS/2 keyboard/mouse)
 python build.py demo                # the desktop in a QEMU window (+ serial console); --auto runs the tour by itself
 python build.py run-uefi            # boot through UEFI firmware
-python build.py test                # build + boot + self-tests + budgets + typed logins, quick desktop tour, screenshot (exit 0 = pass); --smp N (default 4)
+python build.py test                # build + boot + self-tests + budgets + typed logins, a page fetched over TCP, quick desktop tour, screenshot (exit 0 = pass); --smp N (default 4)
 python build.py test-faults         # build 13 crash-on-purpose kernels, check each report
 python build.py unit                # host unit tests: heap, scheduler, buddy, slab (millions of cases)
 python build.py bench               # benchmarks -> appends a row to docs/benchmarks.md
@@ -55,6 +55,7 @@ see `.env.example`).
 build.py                 the only build entry point (build/run/test)
 scripts/                 fat32.py (disk image), test_boot.py (QEMU test harness), fetch_limine.py,
                          make_fonts.py (re-renders kernel/ui/fonts.bin; needs Pillow; rarely run),
+                         make_video.py (PNG frames -> boot/bundle/media/*.bvid; needs Pillow; rarely run),
                          ksyms.py (symbol table), budgets.py (size/boot-time limits), bharat.gdb
 .github/workflows/       CI: one quick job (unit tests + one BIOS boot test)
 boot/limine.conf         boot menu
@@ -73,7 +74,9 @@ kernel/
   drivers/               device drivers (serial, screen console, real-time clock)
   input/                 input event queue; keyboard, mouse and serial decoders; PS/2 + serial IRQs
   fs/                    files in memory (ramfs) and the boot-bundle (tar) loader
-  apps/                  V1 apps: console (login), shell, line editor; desktop apps (*_app.c)
+  net/                   e1000 network card driver; ARP, IPv4, ICMP, UDP, DNS, TCP, HTTP (polled)
+  apps/                  V1 apps: console (login), shell, line editor; desktop apps (*_app.c):
+                         Terminal, Files, Code, Browser, Player, editor, Monitor, Health, About
   ui/                    graphics (gfx), boot splash, window manager (wm), text buffer, desktop, tour
   lib/                   kprintf, string, box drawing
   trace/                 call traces (backtrace.c + generated symbol table), event trace ring

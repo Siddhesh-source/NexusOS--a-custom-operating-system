@@ -8,12 +8,35 @@ itself, and is made for the people who use it.**
 ![Architecture](https://img.shields.io/badge/arch-x86--64-blue)
 ![Language](https://img.shields.io/badge/language-C%20%7C%20NASM-informational)
 ![Boot](https://img.shields.io/badge/boot-Limine%20(BIOS%20%2B%20UEFI)-orange)
-![Tests](https://img.shields.io/badge/boot%20tests-566%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/boot%20tests-622%20passing-brightgreen)
+![Network](https://img.shields.io/badge/TCP%2FIP-from%20scratch-teal)
 ![Status](https://img.shields.io/badge/progress-Phase%2011%20of%2023-yellow)
 
 </div>
 
 ---
+
+## Built from nothing. Every layer.
+
+A kernel, a multi-core scheduler, a window system, **a TCP/IP stack, a
+web browser, a video player and a code editor**, all written from
+scratch for BharatOS, with no Linux and no borrowed kernel underneath.
+It boots, checks itself with **622 self-checks**, logs you in, plays a
+film clip, and fetches web pages over its own TCP, every time
+`python build.py test` runs.
+
+| New in this round | |
+|---|---|
+| 🌐 **Network stack** | own Intel e1000 driver, ARP, IPv4, ICMP, UDP, DNS, TCP and HTTP: `ping`, `host`, `fetch` |
+| 🧭 **Browser** | address bar, links, Back, headings and lists; web pages and local HTML |
+| 🎬 **Player** | plays Big Buck Bunny (Blender Foundation, CC BY) at 12 frames a second |
+| 💻 **Code** | an explorer, line numbers, colours for C, Python, shell and Markdown, Run for scripts |
+| 🗂️ **Files** | Places (Home, Code, Videos, Web pages, Documents, Whole disk) and a disk bar; each file opens in the right app |
+| ⌨️ **Terminal** | Tab completion; `tree cp mv head wc grep df net ping host fetch` |
+| 🚀 **2 GB of RAM** | room for videos, pages and code |
+
+Read the ideas in plain words: [CONCEPTS.md](CONCEPTS.md) ·
+quick wins: [QUICK_WINS.md](QUICK_WINS.md) · the finishing plan: [FINAL.md](FINAL.md)
 
 ## Why BharatOS
 
@@ -30,7 +53,7 @@ simple, solid engineering.
 | 🔒 **Apps ask first** | apps start with no access; you allow or deny; every use is logged | Phase 18 |
 | 🇮🇳 **Made for Bharat** | runs in 128 MB of RAM, works offline, speaks Hindi and Marathi | Phase 22 |
 
-A first desktop works today (V1: windows, Terminal, Files, Monitor, Health); the full one comes in Phase 21.
+A full V1 desktop works today (Terminal, Files, Code, Browser, Player, Monitor, Health, About); the final polish comes in Phase 21.
 More detail: [Project overview](docs/PROJECT_OVERVIEW.md).
 
 ## What works today
@@ -75,10 +98,11 @@ hi
 | **Scheduler** | preemptive time-sharing (20 ms slices), tickless (an idle CPU gets no timer interrupts), idle thread, sleep, live statistics |
 | **Safety** | crashes of a demo thread are reported and contained (the system keeps running), guard pages, stack canaries, compiler stack protector, heap poisoning and red zones (use-after-free and overflow caught), corrupted-state detection, interrupt-safe allocators |
 | **Input** | PS/2 keyboard and mouse for the desktop, typing in a terminal (serial) for the text console, both at once; threads sleep until a key arrives |
-| **Files** | files and folders in memory, filled at boot from a bundle on the disk; size limits checked |
-| **Terminal** | login with your name, a shell with 24 commands (`ls cat echo > cd mkdir rm cpus top ps kill checks lockdemo crashdemo` ...), history with the arrow keys |
+| **Files** | files and folders in memory (up to 4 MB each, 32 MB in all), filled at boot from a bundle on the disk; size limits checked |
+| **Network** | Intel e1000 driver (polled DMA rings), ARP, IPv4, ICMP ping, UDP, DNS, TCP (resends, in-order delivery), HTTP/1.0 with redirects |
+| **Terminal** | login with your name, a shell with 35 commands (`ls cat cp mv tree grep wc head df net ping host fetch cpus top checks` ...), Tab completion, history with the arrow keys |
 | **Desktop** | graphical login with your name; windows you can focus, drag and close; a top bar with your apps, CPU count, health badge and clock; drawn in memory and copied to the screen only where it changed |
-| **Apps** | Terminal (the shell in a window), Files (open, create, delete), Text editor, Monitor (every CPU's load live, work stealing), Health (checks, lock-order and crash demos with their reports), About; a scripted tour (F12) |
+| **Apps** | Terminal, Files (Places, disk bar, open with the right app), Code (explorer, line numbers, colours, Run), Browser (HTTP and local HTML, links, Back), Player (video), Text editor, Monitor (every CPU's load live), Health (checks, lock-order and crash demos), About; a scripted tour (F12) |
 | **Debugging** | crash reports with named call traces and the last 16 kernel events, GDB/LLDB attach mode, host unit tests, benchmarks, size and boot-time budgets, CI |
 
 Full boot log: [docs/logs/boot-output.md](docs/logs/boot-output.md)
@@ -88,14 +112,21 @@ Full boot log: [docs/logs/boot-output.md](docs/logs/boot-output.md)
 **Requirements:** Python 3.9+, Clang/LLD 14+, NASM, QEMU 7+ (plus OVMF for UEFI).
 
 ```bash
-git clone https://github.com/Siddhesh-source/NexusOS--a-custom-operating-system.git
-cd NexusOS--a-custom-operating-system
+git clone https://github.com/Siddhesh-source/BharatOS.git
+cd BharatOS
 python scripts/fetch_limine.py     # one-time: download the bootloader
 python build.py demo               # build and boot with the desktop in a QEMU window
 ```
 
 Type your name in the window and press Enter. Click into the window to
 use the mouse (Ctrl+Alt+G lets it go); F12 starts a tour of the desktop.
+
+Things to try: open **Player** for the film clip; open **Browser** and
+click *example.com* (QEMU's network reaches the internet through your
+PC); open **Code** and press Run on `demo.sh`; in **Terminal**, type
+`ping 10.0.2.2`, `fetch http://example.com/` or `tree /`, and press Tab
+to complete names. To browse pages from your own PC, run
+`python -m http.server 8000` there and open `http://10.0.2.2:8000/`.
 
 Quit QEMU with **Ctrl+A**, then **X**.
 
@@ -166,7 +197,7 @@ Design details: [high-level design](docs/design/HLD.md) ·
 
 ## Testing
 
-Every boot runs **566 checks** inside the kernel, then logs in and types commands at the real prompt, logs in to the desktop with the emulated keyboard, runs the quick desktop tour (which checks its own results) and checks a screenshot:
+Every boot runs **622 checks** inside the kernel, then logs in and types commands at the real prompt, **fetches a web page served by the PC over BharatOS's own TCP**, logs in to the desktop with the emulated keyboard, runs the quick desktop tour (which checks its own results) and checks a screenshot:
 
 | Suite | Checks | Highlights |
 |---|---|---|
@@ -180,7 +211,8 @@ Every boot runs **566 checks** inside the kernel, then logs in and types command
 | Input | 32 | key, terminal and mouse decoding, full queue, keys through the real IRQ 1 / IRQ 12 path, sleeping readers |
 | Files | 46 | paths, create/read/write/list/delete, bad paths, every size limit, the boot bundle |
 | Login and shell | 58 | line editor, login rules, scripted commands with checked output, contained crashes |
-| Desktop | 50 | drawing and clipping, damage-only redraws, windows (focus, drag, close, limits), login screen, every app driven by keys and clicks |
+| Desktop | 53 | drawing and clipping, damage-only redraws, windows (focus, drag, close, limits), login screen, every app driven by keys and clicks |
+| Network and apps | 53 | ARP and ping to the gateway, bad addresses and URLs refused, Code (typing, indent, save, Run), Player (frames follow the clock, pause, seek), Browser (HTML, entities, scripts hidden, links, Back, https refused), Files places, new shell commands, Tab completion |
 
 Outside the kernel, `python build.py unit` runs about **2.8 million** checks
 on the real heap and scheduler code (random operations against a model),
@@ -199,15 +231,16 @@ All suites pass under BIOS and UEFI with zero compiler warnings.
 - [x] **9:** multi-core: per-CPU queues, spinlocks with lock-order checking, TLB shootdown, RCU
 - [x] **10:** V1 core: keyboard and mouse, files in RAM, login with your name, terminal
 - [x] **11:** V1 desktop and demo: windows, top bar, Terminal, Files, editor, Monitor, Health, tour
+- [x] **V1 extras:** 2 GB RAM, TCP/IP stack and e1000 driver, Browser, Player, Code, Files places, Tab completion
 - [ ] **12:** V1 hardening: thorough tests, fuzzing, screenshots, real hardware
 - [ ] **13–14:** user mode with handles and async rings; microkernel IPC and services
 - [ ] **15:** self-check and explain (`why`)
 - [ ] **16–17:** drivers as services; BharatFS with undo, safe from power cuts
-- [ ] **18–19:** permissions and verified boot; networking
+- [ ] **18–19:** permissions and verified boot; networking as a service (HTTPS, DHCP; the stack itself already works)
 - [ ] **20–21:** resume, replay and live migration; desktop polish and WebAssembly apps
 - [ ] **22–23:** made for Bharat (Hindi/Marathi, 128 MB, real hardware); extras
 
-What's next and why: [WAY_AHEAD.md](WAY_AHEAD.md).
+What's next and why: [WAY_AHEAD.md](WAY_AHEAD.md). The fastest path to a finished OS: [FINAL.md](FINAL.md).
 
 The current plan and its reasons: [docs/UPDATES.md](docs/UPDATES.md).
 
@@ -234,7 +267,8 @@ Step-by-step plan with tests for each phase: [docs/ROADMAP.md](docs/ROADMAP.md)
 │   ├── drivers/          serial, screen console, real-time clock
 │   ├── input/            keyboard, mouse and serial input, event queue
 │   ├── fs/               files in memory (ramfs) and the boot bundle
-│   ├── apps/             V1 apps: login console, shell, and the desktop apps
+│   ├── net/              e1000 network card driver; ARP, IP, ICMP, UDP, DNS, TCP, HTTP
+│   ├── apps/             V1 apps: login console, shell, Terminal, Files, Code, Browser, Player, ...
 │   ├── ui/               graphics, boot splash, window manager, desktop, tour
 │   ├── lib/              kprintf, string, box drawing
 │   ├── trace/            call traces (symbol table) and the event trace
@@ -253,6 +287,9 @@ Step-by-step plan with tests for each phase: [docs/ROADMAP.md](docs/ROADMAP.md)
 
 | Document | Contents |
 |---|---|
+| [Concepts](CONCEPTS.md) | how an operating system works, in plain words |
+| [Quick wins](QUICK_WINS.md) | low-effort, high-impact features: done and next |
+| [Final plan](FINAL.md) | what "finished" means and the fastest order to get there |
 | [Project overview](docs/PROJECT_OVERVIEW.md) | the problems, the 5 USPs, talking points |
 | [Plan updates](docs/UPDATES.md) | **current** architecture, Phases 6–20, decision log (wins over older docs) |
 | [Roadmap](docs/ROADMAP.md) | the original Phase 6–12 plan, step by step (see UPDATES §14 for the mapping) |

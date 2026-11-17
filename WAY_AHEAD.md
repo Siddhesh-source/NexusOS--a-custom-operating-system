@@ -3,7 +3,7 @@
 Where BharatOS is, what comes next, and why. The detailed plan is
 `docs/UPDATES.md` §7; this is the short version.
 
-## Where we are (Phases 1–11 done)
+## Where we are (Phases 1–11 and the V1 extras done)
 
 A from-scratch x86-64 kernel that boots on BIOS and UEFI and runs on every
 CPU. It has:
@@ -22,8 +22,16 @@ CPU. It has:
   editor, Monitor (every CPU live), Health (checks, lock-order and crash
   demos) and About; a scripted tour that checks itself.
 
+- **V1 extras:** 2 GB of RAM; a network stack written from scratch
+  (e1000 driver, ARP, IPv4, ICMP, UDP, DNS, TCP, HTTP); the Browser,
+  Player (a film clip) and Code apps; Files with Places and a disk bar;
+  Tab completion and `tree cp mv head wc grep df net ping host fetch`.
+  622 self-checks, and the boot test fetches a page from the PC over TCP.
+
 `python build.py demo`, type your name in the QEMU window, press F12 for
-the tour. Next is Phase 12: hardening V1 before recording the demo.
+the tour. Next is Phase 12: hardening V1 before recording the demo. The
+fastest path from here to a finished OS is in `FINAL.md`; small,
+high-impact ideas are in `QUICK_WINS.md`.
 
 ## What comes next: V1, a demo-ready OS
 
