@@ -351,6 +351,32 @@ fs_status_t fs_unlink(const char *path)
     return FS_OK;
 }
 
+fs_status_t fs_rename(const char *from, const char *to)
+{
+    SPIN_GUARD(&fs_lock);
+    struct node *n, *dir;
+    const char *name;
+    size_t len;
+    fs_status_t st = lookup(from, &n);
+    if (st != FS_OK)
+        return st;
+    if (n == root || n->open_count > 0)
+        return FS_ERR_BUSY;
+    if ((st = walk(to, NULL, &dir, &name, &len)) != FS_OK)
+        return st == FS_ERR_BUSY ? FS_ERR_EXISTS : st;
+    if (find_child(dir, name, len) != NULL)
+        return FS_ERR_EXISTS;
+    for (struct node *d = dir; d != NULL; d = d->parent)
+        if (d == n)
+            return FS_ERR_INVALID;          /* a folder cannot go inside itself */
+    unlink_child(n);
+    memcpy(n->name, name, len);
+    n->name[len] = '\0';
+    link_child(dir, n);
+    n->changed_ns = now_ns();
+    return FS_OK;
+}
+
 fs_status_t fs_stat(const char *path, struct fs_stat *out)
 {
     if (out == NULL)

@@ -4,6 +4,9 @@
  *   http://host[:port]/path   fetched with the network stack
  *   /www/home.html            a file in BharatOS (also file:///www/...)
  *   about:home                the start page (/www/home.html)
+ *   about:bookmarks           your bookmarks (Ctrl+D adds the page shown;
+ *                             kept in /home/<you>/bookmarks.txt)
+ *   about:history             the pages visited, newest first
  * https:// pages say plainly that secure sites need TLS, which is a later
  * step.
  *
@@ -17,6 +20,8 @@
  * arrows / Page Up / Page Down / Space to scroll, Backspace for Back.
  *
  * Limits: no images, CSS, JavaScript or forms; one page at a time;
+ * BOOKMARK_MAX bookmarks; History keeps BROWSER_HISTORY_MAX pages and is
+ * forgotten at restart;
  * fetching runs on the desktop thread, so the desktop waits while a page
  * loads (a few seconds at most, then it gives up). */
 
@@ -65,7 +70,151 @@ struct browser {
     unsigned nhist;
 };
 
-static const char *const br_buttons[] = { "Back", "Home", "Go" };
+static const char *const br_buttons[] = { "Back", "Home", "Bookmarks", "History", "Go" };
+#define BR_BUTTONS 5
+
+/* Pages visited, newest first, shared by every Browser window. */
+static struct {
+    char url[URL_MAX];
+    char title[64];
+} visited[BROWSER_HISTORY_MAX];
+static unsigned nvisited;
+
+static void remember_visit(const char *url, const char *title)
+{
+    if (strncmp(url, "about:", 6) == 0 || (nvisited > 0 && strcmp(visited[0].url, url) == 0))
+        return;
+    unsigned n = nvisited < BROWSER_HISTORY_MAX ? nvisited : BROWSER_HISTORY_MAX - 1;
+    memmove(&visited[1], &visited[0], n * sizeof(visited[0]));
+    strlcpy(visited[0].url, url, URL_MAX);
+    strlcpy(visited[0].title, title, sizeof(visited[0].title));
+    nvisited = n + 1;
+}
+
+/* Append `s` to a generated page, with <, > and & written as entities so
+ * a page title can never add tags of its own. */
+static size_t put_text(char *out, size_t at, size_t cap, const char *s, bool escape)
+{
+    for (; *s != '\0' && at + 6 < cap; s++) {
+        const char *e = !escape ? NULL : *s == '<' ? "&lt;" : *s == '>' ? "&gt;" : *s == '&' ? "&amp;"
+                        : *s == '"' ? "&quot;" : NULL;
+        if (e != NULL)
+            while (*e != '\0')
+                out[at++] = *e++;
+        else
+            out[at++] = *s;
+    }
+    out[at] = '\0';
+    return at;
+}
+
+static size_t put_link(char *out, size_t at, size_t cap, const char *url, const char *title)
+{
+    at = put_text(out, at, cap, "<li><a href=\"", false);
+    at = put_text(out, at, cap, url, true);
+    at = put_text(out, at, cap, "\">", false);
+    at = put_text(out, at, cap, title[0] != '\0' ? title : url, true);
+    at = put_text(out, at, cap, "</a> ", false);
+    at = put_text(out, at, cap, url, true);
+    return put_text(out, at, cap, "</li>", false);
+}
+
+static bool bookmarks_path(char *path)
+{
+    if (desktop_user()[0] == '\0')
+        return false;
+    ksnprintf(path, FS_PATH_MAX, "/home/%s/bookmarks.txt", desktop_user());
+    return true;
+}
+
+/* The bookmarks file: one "address<Tab>title" line per bookmark. Returns
+ * its text (kfree it) and its number of lines, or NULL if there is none. */
+static char *read_bookmarks(unsigned *lines)
+{
+    char path[FS_PATH_MAX];
+    size_t len = 0;
+    char *buf = kmalloc(BOOKMARK_MAX * (URL_MAX + 70) + 1);
+    *lines = 0;
+    if (buf == NULL || !bookmarks_path(path)
+        || fs_read_file(path, buf, BOOKMARK_MAX * (URL_MAX + 70), &len) != FS_OK) {
+        kfree(buf);
+        return NULL;
+    }
+    buf[len] = '\0';
+    for (size_t i = 0; i < len; i++)
+        *lines += buf[i] == '\n';
+    return buf;
+}
+
+/* True if a line of `text` starts with `start`. */
+static bool line_in(const char *text, const char *start)
+{
+    size_t n = strlen(start);
+    for (const char *l = strchr(text, '\n'); l != NULL; l = strchr(l + 1, '\n'))
+        if (strncmp(l + 1, start, n) == 0)
+            return true;
+    return false;
+}
+
+/* Ctrl+D: add the page shown to the bookmarks. */
+static void add_bookmark(struct window *w)
+{
+    struct browser *b = w->st;
+    char path[FS_PATH_MAX], line[URL_MAX + 72];
+    unsigned n = 0;
+    char *have = read_bookmarks(&n);
+    ksnprintf(line, sizeof(line), "%s\t", b->url);
+    if (!bookmarks_path(path) || strncmp(b->url, "about:", 6) == 0)
+        strlcpy(b->msg, "This page cannot be bookmarked", sizeof(b->msg));
+    else if (have != NULL && (strncmp(have, line, strlen(line)) == 0 || line_in(have, line)))
+        strlcpy(b->msg, "Already in your bookmarks", sizeof(b->msg));
+    else if (n >= BOOKMARK_MAX)
+        ksnprintf(b->msg, sizeof(b->msg), "Bookmarks are full (%u); remove some from bookmarks.txt", BOOKMARK_MAX);
+    else {
+        char title[64];
+        strlcpy(title, b->title, sizeof(title));
+        for (char *t = title; *t != '\0'; t++)
+            if (*t == '\t' || *t == '\n')
+                *t = ' ';
+        ksnprintf(line, sizeof(line), "%s\t%s\n", b->url, title);
+        fs_status_t st = fs_write_file(path, line, strlen(line), true);
+        ksnprintf(b->msg, sizeof(b->msg), st == FS_OK ? "Bookmarked (see Bookmarks)" : "Not bookmarked: %s",
+                  fs_status_str(st));
+    }
+    kfree(have);
+    wm_redraw(w);
+}
+
+/* about:bookmarks and about:history, written as HTML into b->raw. */
+static size_t make_list_page(struct browser *b, bool bookmarks)
+{
+    size_t at = put_text(b->raw, 0, NET_PAGE_MAX, bookmarks ? "<title>Bookmarks</title><h1>Bookmarks</h1><ul>"
+                                                            : "<title>History</title><h1>History</h1><ul>", false);
+    unsigned count = 0;
+    if (bookmarks) {
+        char *list = read_bookmarks(&count);
+        for (char *l = list; l != NULL && *l != '\0';) {
+            char *nl = strchr(l, '\n'), *tab = strchr(l, '\t');
+            if (nl == NULL)
+                break;
+            *nl = '\0';
+            if (tab != NULL && tab < nl)
+                *tab = '\0';
+            at = put_link(b->raw, at, NET_PAGE_MAX, l, tab != NULL && tab < nl ? tab + 1 : "");
+            l = nl + 1;
+        }
+        kfree(list);
+    } else {
+        for (unsigned i = 0; i < nvisited; i++)
+            at = put_link(b->raw, at, NET_PAGE_MAX, visited[i].url, visited[i].title);
+        count = nvisited;
+    }
+    at = put_text(b->raw, at, NET_PAGE_MAX, "</ul>", false);
+    if (count == 0)
+        at = put_text(b->raw, at, NET_PAGE_MAX, bookmarks ? "<p>No bookmarks yet. Press Ctrl+D on a page to add it.</p>"
+                                                          : "<p>No pages visited yet.</p>", false);
+    return at;
+}
 
 /* ---- layout ----------------------------------------------------------------- */
 
@@ -354,11 +503,14 @@ static void load(struct window *w, const char *where, bool remember)
         strlcpy(b->hist[HIST_MAX - 1], b->url, URL_MAX);
     }
     size_t len = 0;
-    bool html = true;
+    bool html = true, good = true;          /* good: worth keeping in History */
     b->msg[0] = '\0';
-    if (url[0] == '/') {
+    if (strcmp(url, "about:bookmarks") == 0 || strcmp(url, "about:history") == 0) {
+        len = make_list_page(b, url[6] == 'b');
+    } else if (url[0] == '/') {
         fs_status_t st = fs_read_file(url, b->raw, NET_PAGE_MAX, &len);
         if (st != FS_OK) {
+            good = false;
             ksnprintf(b->msg, sizeof(b->msg), "Cannot open %s: %s", url, fs_status_str(st));
             len = 0;
         }
@@ -374,12 +526,15 @@ static void load(struct window *w, const char *where, bool remember)
         char final_url[256];
         net_status_t st = http_get(url, b->raw, NET_PAGE_MAX, &len, &status, final_url);
         strlcpy(url, final_url, sizeof(url));
+        good = st == NET_OK || len > 0;
         if (st == NET_ERR_UNSUPPORTED) {
+            good = false;
             len = (size_t)ksnprintf(b->raw, NET_PAGE_MAX,
                 "<h1>Secure page</h1><p>%s is a secure (https) address. Secure pages need "
                 "encryption (TLS), which BharatOS does not have yet.</p><p>Try an http:// "
                 "address, or <a href=\"about:home\">the start page</a>.</p>", url);
         } else if (st != NET_OK && len == 0) {
+            good = false;
             len = (size_t)ksnprintf(b->raw, NET_PAGE_MAX,
                 "<h1>Could not open the page</h1><p>%s: %s.</p><p>Is the network on? QEMU's "
                 "built-in network reaches the internet through your PC. Pages on your own PC are "
@@ -395,6 +550,8 @@ static void load(struct window *w, const char *where, bool remember)
     b->editing = false;
     b->scroll = 0;
     layout_page(b, b->raw, len, html, BR_W - 2 * UI_PAD - 20);
+    if (good)
+        remember_visit(url, b->title);
     char t[48];
     ksnprintf(t, sizeof(t), "Browser: %s", b->title[0] ? b->title : url);
     wm_set_title(w, t);
@@ -430,8 +587,8 @@ static void br_close(struct window *w)
 
 static struct gfx_rect url_field(struct gfx_rect body)
 {
-    int32_t x = body.x + UI_PAD + 3 * 8;
-    for (unsigned i = 0; i < 3; i++)
+    int32_t x = body.x + UI_PAD + BR_BUTTONS * 8;
+    for (unsigned i = 0; i < BR_BUTTONS; i++)
         x += gfx_text_width(br_buttons[i], FONT_MEDIUM) + 28;
     return gfx_rect(x, body.y + 12, body.x + body.w - UI_PAD - x, 32);
 }
@@ -444,7 +601,7 @@ static int32_t view_h(struct gfx_rect body)
 static void br_draw(struct window *w, struct gfx_rect body)
 {
     struct browser *b = w->st;
-    ui_buttons(body, br_buttons, 3, 2, true, -1, -1);
+    ui_buttons(body, br_buttons, BR_BUTTONS, 4, true, -1, -1);
     struct gfx_rect f = url_field(body);
     gfx_round(f, UI_RADIUS_SM, b->editing ? COL_PRIMARY : COL_LINE, 255);
     gfx_round(gfx_grow(f, -2), UI_RADIUS_SM - 2, COL_SURFACE, 255);
@@ -479,7 +636,8 @@ static void br_draw(struct window *w, struct gfx_rect body)
     int32_t sy = body.y + body.h - 26;
     gfx_fill(gfx_rect(body.x, sy - 4, body.w, 1), COL_LINE);
     char st[140];
-    ksnprintf(st, sizeof(st), "%s%s%u links", b->msg, b->msg[0] ? "     " : "", b->nlinks);
+    ksnprintf(st, sizeof(st), "%s%s%u links     Ctrl+D bookmarks this page", b->msg, b->msg[0] ? "     " : "",
+              b->nlinks);
     gfx_text(body.x + UI_PAD, sy + 2, st, COL_MUTED, FONT_SMALL);
 }
 
@@ -523,6 +681,9 @@ static void br_key(struct window *w, uint16_t key)
             b->edit[n] = (char)key;
             b->edit[n + 1] = '\0';
         }
+    } else if (key == 4) {                      /* Ctrl+D */
+        add_bookmark(w);
+        return;
     } else if (key == 12) {                     /* Ctrl+L */
         b->editing = true;
         b->edit[0] = '\0';
@@ -547,7 +708,7 @@ static void br_click(struct window *w, int32_t x, int32_t y)
 {
     struct browser *b = w->st;
     struct gfx_rect body = gfx_rect(0, 0, wm_body(w).w, wm_body(w).h);
-    int hit = ui_buttons(body, br_buttons, 3, 2, false, x, y);
+    int hit = ui_buttons(body, br_buttons, BR_BUTTONS, 4, false, x, y);
     if (hit == 0) {
         back(w);
         return;
@@ -556,7 +717,11 @@ static void br_click(struct window *w, int32_t x, int32_t y)
         load(w, "about:home", true);
         return;
     }
-    if (hit == 2) {
+    if (hit == 2 || hit == 3) {
+        load(w, hit == 2 ? "about:bookmarks" : "about:history", true);
+        return;
+    }
+    if (hit == 4) {
         char u[URL_MAX];
         strlcpy(u, b->editing ? b->edit : b->url, sizeof(u));
         load(w, u, true);
@@ -625,6 +790,11 @@ void browser_go(struct window *w, const char *url)
 {
     if (w != NULL && w->app == &app_browser)
         load(w, url, true);
+}
+
+const char *browser_message(struct window *w)
+{
+    return w != NULL && w->app == &app_browser ? ((struct browser *)w->st)->msg : "";
 }
 
 void browser_back(struct window *w)

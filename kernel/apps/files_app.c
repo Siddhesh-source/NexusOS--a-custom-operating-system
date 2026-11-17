@@ -6,8 +6,14 @@
  * Code, anything else in the text editor). Up (or Backspace) closes the
  * folder and goes back to the one holding it. New file and New folder ask
  * for a name on the bottom line; Delete removes the selected file or empty
- * folder. Keys: arrows, Enter, Backspace (up), n (new file), d (new
- * folder), Delete. */
+ * folder. Rename asks for a new name (the old one is filled in). Copy
+ * remembers the selected file; Paste puts a copy of it in the folder shown
+ * (named "name-copy.ext" if the name is taken). Keys: arrows, Enter,
+ * Backspace (up), n (new file), d (new folder), r (rename), Ctrl+C,
+ * Ctrl+V, Delete.
+ *
+ * Limits: Copy works on files, not folders; one thing on the clipboard,
+ * shared by every Files window. */
 
 #include "apps.h"
 #include "theme.h"
@@ -29,7 +35,10 @@ static const char *const place_names[] = { "Home", "Code", "Videos", "Web pages"
 static const char *const place_paths[] = { NULL, "/code", "/media", "/www", "/docs", "/" };
 #define PLACES 6
 
-enum { NORMAL, NEW_FILE, NEW_FOLDER };
+enum { NORMAL, NEW_FILE, NEW_FOLDER, RENAME };
+
+/* The file Copy remembered (empty: nothing copied). */
+static char clipboard[FS_PATH_MAX];
 
 struct files {
     char cwd[FS_PATH_MAX];
@@ -37,10 +46,13 @@ struct files {
     unsigned n, sel, top;
     int mode;
     char name[FS_NAME_MAX];
+    char old[FS_NAME_MAX];              /* RENAME: the name being changed */
     char msg[80];
 };
 
-static const char *const files_buttons[] = { "Up", "Open", "New file", "New folder", "Delete" };
+static const char *const files_buttons[] = { "Up", "Open", "New file", "New folder", "Rename", "Copy", "Paste",
+                                             "Delete" };
+#define FILES_BUTTONS 8
 
 static void load(struct files *f)
 {
@@ -111,16 +123,87 @@ static void delete_selected(struct files *f)
     load(f);
 }
 
+/* Copy: remember the selected file. */
+static void copy_selected(struct files *f)
+{
+    if (f->n == 0 || f->ents[f->sel].type != FS_FILE || !child(f, f->ents[f->sel].name, clipboard)) {
+        strlcpy(f->msg, "Select a file to copy (folders cannot be copied yet).", sizeof(f->msg));
+        return;
+    }
+    ksnprintf(f->msg, sizeof(f->msg), "Copied %s. Open a folder and press Paste.", f->ents[f->sel].name);
+}
+
+/* "notes.txt" -> "notes-copy.txt", then "notes-copy2.txt", ... */
+static bool free_copy_name(struct files *f, const char *name, char *out)
+{
+    const char *dot = strrchr(name, '.');
+    size_t base = dot != NULL && dot != name ? (size_t)(dot - name) : strlen(name);
+    struct fs_stat st;
+    for (unsigned i = 0; i < 10; i++) {
+        char n[FS_NAME_MAX + 16], tag[8] = "";
+        if (i > 0)
+            ksnprintf(tag, sizeof(tag), i == 1 ? "-copy" : "-copy%u", i);
+        if (base + strlen(tag) + strlen(name + base) >= FS_NAME_MAX)
+            return false;
+        memcpy(n, name, base);
+        n[base] = '\0';
+        strlcpy(n + base, tag, sizeof(n) - base);
+        strlcpy(n + strlen(n), name + base, sizeof(n) - strlen(n));
+        if (strlen(n) >= FS_NAME_MAX || !child(f, n, out))
+            return false;
+        if (fs_stat(out, &st) == FS_ERR_NOT_FOUND)
+            return true;
+    }
+    return false;
+}
+
+/* Paste: a copy of the remembered file in this folder. */
+static void paste(struct files *f)
+{
+    struct fs_stat st;
+    if (clipboard[0] == '\0' || fs_stat(clipboard, &st) != FS_OK || st.type != FS_FILE) {
+        strlcpy(f->msg, "Nothing to paste: copy a file first.", sizeof(f->msg));
+        return;
+    }
+    const char *name = strrchr(clipboard, '/') + 1;
+    char to[FS_PATH_MAX];
+    if (!free_copy_name(f, name, to)) {
+        ksnprintf(f->msg, sizeof(f->msg), "Too many copies of %s here.", name);
+        return;
+    }
+    uint8_t *buf = kmalloc(st.size > 0 ? st.size : 1);
+    size_t len = 0;
+    fs_status_t r = buf == NULL ? FS_ERR_NO_SPACE : fs_read_file(clipboard, buf, st.size, &len);
+    if (r == FS_OK)
+        r = fs_write_file(to, buf, len, false);
+    kfree(buf);
+    if (r == FS_OK)
+        ksnprintf(f->msg, sizeof(f->msg), "Pasted %s.", strrchr(to, '/') + 1);
+    else
+        ksnprintf(f->msg, sizeof(f->msg), "Cannot paste: %s.", fs_status_str(r));
+    load(f);
+    for (unsigned i = 0; r == FS_OK && i < f->n; i++)
+        if (strcmp(f->ents[i].name, strrchr(to, '/') + 1) == 0)
+            f->sel = i;
+}
+
 static void create(struct files *f)
 {
-    char p[FS_PATH_MAX];
+    char p[FS_PATH_MAX], old[FS_PATH_MAX];
     fs_status_t st = FS_ERR_INVALID;
-    if (f->name[0] != '\0' && child(f, f->name, p))
-        st = f->mode == NEW_FILE ? fs_create(p) : fs_mkdir(p);
-    if (st == FS_OK)
+    if (f->name[0] != '\0' && child(f, f->name, p)) {
+        if (f->mode == RENAME)
+            st = child(f, f->old, old) ? fs_rename(old, p) : FS_ERR_INVALID;
+        else
+            st = f->mode == NEW_FILE ? fs_create(p) : fs_mkdir(p);
+    }
+    if (st == FS_OK && f->mode == RENAME)
+        ksnprintf(f->msg, sizeof(f->msg), "Renamed %s to %s.", f->old, f->name);
+    else if (st == FS_OK)
         ksnprintf(f->msg, sizeof(f->msg), "Created %s.", f->name);
     else
-        ksnprintf(f->msg, sizeof(f->msg), "Cannot create '%s': %s.", f->name, fs_status_str(st));
+        ksnprintf(f->msg, sizeof(f->msg), "Cannot %s '%s': %s.", f->mode == RENAME ? "rename to" : "create",
+                  f->name, fs_status_str(st));
     f->mode = NORMAL;
     load(f);
     for (unsigned i = 0; st == FS_OK && i < f->n; i++)
@@ -139,7 +222,7 @@ static void keep_visible(struct files *f)
 static void files_draw(struct window *w, struct gfx_rect body)
 {
     struct files *f = w->st;
-    ui_buttons(body, files_buttons, 5, -1, true, -1, -1);
+    ui_buttons(body, files_buttons, FILES_BUTTONS, -1, true, -1, -1);
     /* Places and the disk */
     struct gfx_rect side = gfx_rect(body.x + 8, body.y + UI_BAR_H, SIDE - 16, body.h - UI_BAR_H - 56);
     gfx_round(side, UI_RADIUS_SM, COL_SURFACE_2, 255);
@@ -206,7 +289,8 @@ static void files_draw(struct window *w, struct gfx_rect body)
     x = body.x + UI_PAD;
     gfx_fill(gfx_rect(body.x, by - 8, body.w, 1), COL_LINE);
     if (f->mode != NORMAL) {
-        const char *label = f->mode == NEW_FILE ? "New file name" : "New folder name";
+        const char *label = f->mode == NEW_FILE ? "New file name" : f->mode == RENAME ? "New name"
+                            : "New folder name";
         int32_t lw = gfx_text_width(label, FONT_SMALL);
         gfx_text(x, by + 9, label, COL_MUTED, FONT_SMALL);
         struct gfx_rect field = gfx_rect(x + lw + 12, by + 2, body.w - 2 * UI_PAD - lw - 12, 32);
@@ -229,7 +313,16 @@ static void action(struct window *w, int which)
         f->mode = which == 2 ? NEW_FILE : NEW_FOLDER;
         f->name[0] = '\0';
         break;
-    case 4: delete_selected(f); break;
+    case 4:
+        if (f->n > 0) {
+            f->mode = RENAME;
+            strlcpy(f->old, f->ents[f->sel].name, sizeof(f->old));
+            strlcpy(f->name, f->old, sizeof(f->name));
+        }
+        break;
+    case 5: copy_selected(f); break;
+    case 6: paste(f); break;
+    case 7: delete_selected(f); break;
     }
 }
 
@@ -258,8 +351,12 @@ static void files_key(struct window *w, uint16_t key)
         action(w, 0);
     } else if (key == 'n' || key == 'd') {
         action(w, key == 'n' ? 2 : 3);
-    } else if (key == INPUT_KEY_DELETE) {
+    } else if (key == 'r') {
         action(w, 4);
+    } else if (key == 3 || key == 22) {                 /* Ctrl+C, Ctrl+V */
+        action(w, key == 3 ? 5 : 6);
+    } else if (key == INPUT_KEY_DELETE) {
+        action(w, 7);
     }
     keep_visible(f);
     wm_redraw(w);
@@ -269,7 +366,7 @@ static void files_click(struct window *w, int32_t x, int32_t y)
 {
     struct files *f = w->st;
     struct gfx_rect b = wm_body(w);
-    int hit = ui_buttons(gfx_rect(0, 0, b.w, b.h), files_buttons, 5, -1, false, x, y);
+    int hit = ui_buttons(gfx_rect(0, 0, b.w, b.h), files_buttons, FILES_BUTTONS, -1, false, x, y);
     if (hit >= 0) {
         action(w, hit);
     } else if (x < SIDE) {
@@ -327,6 +424,11 @@ const char *files_selected(struct window *w)
     return f != NULL && f->n > 0 ? f->ents[f->sel].name : "";
 }
 
+const char *files_message(struct window *w)
+{
+    return w != NULL && w->app == &app_files ? ((struct files *)w->st)->msg : "";
+}
+
 const char *files_folder(struct window *w)
 {
     return w != NULL && w->app == &app_files ? ((struct files *)w->st)->cwd : "";
@@ -334,7 +436,7 @@ const char *files_folder(struct window *w)
 
 const struct app app_files = {
     .name = "Files",
-    .w = 600 + SIDE,
+    .w = 680 + SIDE,
     .h = LIST_Y + LIST_ROWS * ROW_H + 60,
     .tile = 0xEFE3CC,
     .icon = icon_files,

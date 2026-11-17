@@ -57,6 +57,11 @@ uint64_t clock_now_ns(void)
     return ready ? mul_shift32(rdtsc() - tsc_start, ns_mult) : 0;
 }
 
+uint64_t clock_boot_ns(void)
+{
+    return ready ? mul_shift32(rdtsc(), ns_mult) : 0;
+}
+
 void clock_delay_ns(uint64_t ns)
 {
     uint64_t end = clock_now_ns() + ns;

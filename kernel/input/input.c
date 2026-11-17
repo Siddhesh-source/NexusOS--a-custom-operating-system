@@ -246,6 +246,7 @@ static uint16_t kbd_extended_key(uint8_t code)
     case 0x49: return INPUT_KEY_PAGE_UP;
     case 0x51: return INPUT_KEY_PAGE_DOWN;
     case 0x52: return INPUT_KEY_INSERT;
+    case 0x37: return INPUT_KEY_PRINT;     /* Print Screen (after a fake shift) */
     case 0x1C: return '\n';                 /* keypad Enter */
     case 0x35: return '/';                  /* keypad / */
     }

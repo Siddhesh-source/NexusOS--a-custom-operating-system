@@ -27,6 +27,7 @@ static const char *const class_names[LOCK_CLASS_COUNT] = {
     [LOCK_CLASS_DEMO_A]   = "demo A",
     [LOCK_CLASS_DEMO_B]   = "demo B",
     [LOCK_CLASS_NET]      = "network",
+    [LOCK_CLASS_RUST_SVC] = "rust service",
 };
 
 const char *lock_class_name(unsigned c)

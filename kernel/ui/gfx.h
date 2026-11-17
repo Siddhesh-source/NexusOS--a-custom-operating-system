@@ -92,6 +92,10 @@ int32_t gfx_text_n(int32_t x, int32_t y, const char *s, unsigned n, uint32_t rgb
 int32_t gfx_text(int32_t x, int32_t y, const char *s, uint32_t rgb, enum font_id f);
 int32_t gfx_text_width(const char *s, enum font_id f);
 int32_t gfx_line_height(enum font_id f);
+/* A pre-shaped Hindi/Marathi phrase (font.h), top-left at (x, y). Returns
+ * its width; 0 (nothing drawn) for an unknown phrase. */
+int32_t gfx_phrase(int32_t x, int32_t y, enum phrase_id id, uint32_t rgb);
+int32_t gfx_phrase_width(enum phrase_id id);
 
 /* An image of w x h palette indexes (one byte per pixel), each pixel
  * drawn as a scale x scale square. `packed` holds 256 colours already

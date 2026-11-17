@@ -12,6 +12,8 @@
  *
  * The login screen asks for a name (and a password if /etc/users lists
  * one), with the same rules as the text console. "Log out" returns to it.
+ * It greets in Hindi and Marathi; F1 switches its labels between English,
+ * Hindi and Marathi (pre-shaped phrases, font.h).
  *
  * F12 starts a scripted tour of the desktop (Shift+F12: a quick one, used
  * by the boot test); a kernel built with BHARAT_DEMO_AUTO logs in and
@@ -22,6 +24,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
+#include "fs.h"
 
 /* Start the desktop thread if there is a screen to draw on. */
 void desktop_start(void);
@@ -39,6 +43,18 @@ void login_reset(void);
 void login_draw(void);
 /* The login screen's message line ("" if none), for self-tests. */
 const char *login_message(void);
+/* The login screen's language; F1 there switches English -> Hindi ->
+ * Marathi. A greeting in Hindi and Marathi is always shown. */
+enum login_lang { LOGIN_ENGLISH, LOGIN_HINDI, LOGIN_MARATHI };
+void login_set_language(enum login_lang l);
+enum login_lang login_language(void);
+
+/* Print Screen: save the screen as /home/<user>/screenshot-N.ppm (the
+ * first free N up to DESKTOP_SHOTS_MAX); the path goes into `path` (at
+ * least FS_PATH_MAX bytes). FS_ERR_EXISTS when all names are taken;
+ * FS_ERR_INVALID when nobody is logged in. */
+#define DESKTOP_SHOTS_MAX 20
+fs_status_t desktop_screenshot(char *path, size_t cap);
 
 /* The tour: a list of steps run by the desktop thread. */
 void tour_start(bool fast);

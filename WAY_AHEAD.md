@@ -28,6 +28,12 @@ CPU. It has:
   Tab completion and `tree cp mv head wc grep df net ping host fetch`.
   622 self-checks, and the boot test fetches a page from the PC over TCP.
 
+- **Quick wins, round 2:** DHCP; `why slow` and `why crash`; a Hindi and
+  Marathi login screen; screenshots; Code tabs and find; a Player
+  playlist and full screen; Browser bookmarks and history; Files copy,
+  paste and rename; terminal scrollback and colours; the boot time on the
+  splash; the first Rust service. 707 self-checks.
+
 `python build.py demo`, type your name in the QEMU window, press F12 for
 the tour. Next is Phase 12: hardening V1 before recording the demo. The
 fastest path from here to a finished OS is in `FINAL.md`; small,

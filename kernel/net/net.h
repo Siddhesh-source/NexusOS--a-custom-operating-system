@@ -14,9 +14,11 @@
  *             resending of anything not acknowledged
  *   HTTP      GET a page (HTTP/1.0, follows a few redirects)
  *
- * Settings are fixed to QEMU's built-in network ("user" mode): our
- * address 10.0.2.15, the gateway 10.0.2.2 (which is also the host PC),
- * the name server 10.0.2.3.
+ *   DHCP      asks the network for our address, gateway and name server
+ *
+ * Settings come from DHCP at start-up. If nobody answers, QEMU's fixed
+ * "user" network settings are used: our address 10.0.2.15, the gateway
+ * 10.0.2.2 (which is also the host PC), the name server 10.0.2.3.
  *
  * How it runs: nothing runs in the background. Whoever waits for the
  * network (ping, the browser) calls net_poll() in a loop, which takes the
@@ -24,7 +26,7 @@
  * right connection. One spinlock ("network") guards all of it; waiting
  * happens outside the lock (sched_sleep), never while holding it.
  *
- * Limits: IPv4 only; no DHCP (fixed settings); NET_MAX_TCP connections;
+ * Limits: IPv4 only; the DHCP lease is not renewed; NET_MAX_TCP connections;
  * TCP keeps data that arrives in order and asks again for the rest; no
  * HTTPS (that needs TLS, a later step); a page is at most NET_PAGE_MAX
  * bytes. */
@@ -51,12 +53,33 @@ struct net_stats {
     uint64_t frames_in, frames_out, arp_replies, pings_answered, tcp_segments_in, tcp_resent;
 };
 
-/* Start the card and the stack. False if there is no card. */
+/* Where we are on the network: given by DHCP, or QEMU's fixed settings
+ * if no DHCP server answered. */
+struct net_config {
+    uint32_t ip, netmask, gateway, dns, lease_s;
+    bool from_dhcp;
+};
+
+/* One DHCP answer, as read by net_dhcp_parse. type: 2 offer, 5 ack, 6 no. */
+struct net_dhcp_reply {
+    uint8_t type;
+    uint32_t ip, server, netmask, router, dns, lease_s;
+};
+
+/* Start the card and the stack, then ask DHCP for an address. False if
+ * there is no card. */
 bool net_init(void);
 bool net_up(void);
 /* Our address. Addresses are plain numbers: 10.0.2.15 is 0x0A00020F. */
 uint32_t net_ip(void);
 uint32_t net_gateway(void);
+void net_get_config(struct net_config *out);
+/* Ask the network's DHCP server for an address (discover, offer,
+ * request, ack). On failure the old settings stay. */
+net_status_t net_dhcp(unsigned timeout_ms);
+/* Read a DHCP answer for transaction `xid`; false if it is not one or is
+ * damaged (an option running past the end, no message type, ...). */
+bool net_dhcp_parse(const uint8_t *m, size_t n, uint32_t xid, struct net_dhcp_reply *r);
 void net_mac(uint8_t mac[6]);
 void net_get_stats(struct net_stats *out);
 

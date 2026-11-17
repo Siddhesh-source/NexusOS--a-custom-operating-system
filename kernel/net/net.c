@@ -8,11 +8,12 @@
 #include "kprintf.h"
 #include "string.h"
 
-/* Addresses are kept as plain numbers: 10.0.2.15 is 0x0A00020F. */
-#define MY_IP      0x0A00020Fu
-#define GATEWAY    0x0A000202u
-#define DNS_SERVER 0x0A000203u
-#define NETMASK    0xFFFFFF00u
+/* Addresses are kept as plain numbers: 10.0.2.15 is 0x0A00020F. They
+ * start as QEMU's fixed settings and are replaced by what DHCP hands out. */
+#define FIXED_IP 0x0A00020Fu
+static uint32_t my_ip = FIXED_IP, gateway = 0x0A000202u, dns_server = 0x0A000203u,
+                netmask = 0xFFFFFF00u, lease_s;
+static bool from_dhcp;
 
 #define ETH_IP   0x0800
 #define ETH_ARP  0x0806
@@ -69,8 +70,20 @@ static uint64_t now_ms(void) { return clock_now_ns() / 1000000; }
 /* ---- small public helpers ------------------------------------------------- */
 
 bool net_up(void) { return up; }
-uint32_t net_ip(void) { return MY_IP; }
-uint32_t net_gateway(void) { return GATEWAY; }
+uint32_t net_ip(void) { return my_ip; }
+uint32_t net_gateway(void) { return gateway; }
+
+void net_get_config(struct net_config *out)
+{
+    SPIN_GUARD(&net_lock);
+    out->ip = my_ip;
+    out->netmask = netmask;
+    out->gateway = gateway;
+    out->dns = dns_server;
+    out->lease_s = lease_s;
+    out->from_dhcp = from_dhcp;
+}
+
 void net_mac(uint8_t mac[6]) { memcpy(mac, my_mac, 6); }
 
 void net_get_stats(struct net_stats *out)
@@ -165,7 +178,7 @@ static void arp_send_locked(uint16_t op, const uint8_t dst_mac[6], uint32_t targ
     a[5] = 4;
     put16(a + 6, op);
     memcpy(a + 8, my_mac, 6);
-    put32(a + 14, MY_IP);
+    put32(a + 14, my_ip);
     memset(a + 18, 0, 6);
     if (op == 2)
         memcpy(a + 18, dst_mac, 6);
@@ -181,7 +194,7 @@ static void arp_input_locked(const uint8_t *a, size_t n)
     uint16_t op = get16(a + 6);
     uint32_t sender = get32(a + 14), target = get32(a + 24);
     arp_learn_locked(sender, a + 8);
-    if (op == 1 && target == MY_IP) {
+    if (op == 1 && target == my_ip) {
         arp_send_locked(2, a + 8, sender);
         stats.arp_replies++;
     }
@@ -191,7 +204,7 @@ net_status_t net_arp_resolve(uint32_t ip, uint8_t mac[6], unsigned timeout_ms)
 {
     if (!up)
         return NET_ERR_NO_CARD;
-    uint32_t hop = (ip & NETMASK) == (MY_IP & NETMASK) ? ip : GATEWAY;
+    uint32_t hop = (ip & netmask) == (my_ip & netmask) ? ip : gateway;
     uint64_t end = now_ms() + timeout_ms, next_ask = 0;
     for (;;) {
         net_poll();
@@ -229,7 +242,7 @@ static bool ip_send_locked(const uint8_t dst_mac[6], uint32_t dst, uint8_t proto
     ip[8] = 64;
     ip[9] = proto;
     put16(ip + 10, 0);
-    put32(ip + 12, MY_IP);
+    put32(ip + 12, my_ip);
     put32(ip + 16, dst);
     put16(ip + 10, sum_fold(sum_add(0, ip, 20)));
     bool ok = e1000_send(f, 14 + 20 + len);
@@ -306,7 +319,7 @@ net_status_t net_ping(uint32_t ip, uint16_t seq, unsigned timeout_ms, uint64_t *
 
 /* ---- UDP (one waiting reply) -------------------------------------------- */
 
-static struct { uint16_t port; bool ready; size_t len; uint8_t data[512]; } udp_wait;
+static struct { uint16_t port; bool ready; size_t len; uint8_t data[600]; } udp_wait;
 
 static void udp_input_locked(const uint8_t *p, size_t n)
 {
@@ -379,11 +392,11 @@ net_status_t net_resolve(const char *host, uint32_t *ip)
     if (net_parse_ip(host, ip))
         return NET_OK;
     if (strcmp(host, "localhost") == 0) {
-        *ip = MY_IP;
+        *ip = my_ip;
         return NET_OK;
     }
     uint8_t mac[6];
-    net_status_t st = net_arp_resolve(DNS_SERVER, mac, 1000);
+    net_status_t st = net_arp_resolve(dns_server, mac, 1000);
     if (st != NET_OK)
         return st;
     uint16_t id = (uint16_t)rdtsc();
@@ -419,7 +432,7 @@ net_status_t net_resolve(const char *host, uint32_t *ip)
             put16(u + 2, 53);
             put16(u + 4, (uint16_t)(8 + o));
             put16(u + 6, 0);                  /* no checksum (allowed on IPv4) */
-            ip_send_locked(mac, DNS_SERVER, PROTO_UDP, 8 + o);
+            ip_send_locked(mac, dns_server, PROTO_UDP, 8 + o);
         }
         uint64_t end = now_ms() + 1500;
         while (now_ms() < end) {
@@ -431,6 +444,128 @@ net_status_t net_resolve(const char *host, uint32_t *ip)
         }
     }
     return NET_ERR_TIMEOUT;
+}
+
+/* ---- DHCP ----------------------------------------------------------------- */
+
+/* A DHCP message: a fixed 236-byte part, the "magic cookie", then
+ * options (code, length, value), ending with 255. */
+#define DHCP_FIXED  236
+#define DHCP_MAGIC  0x63825363u
+
+bool net_dhcp_parse(const uint8_t *m, size_t n, uint32_t xid, struct net_dhcp_reply *r)
+{
+    if (m == NULL || r == NULL || n < DHCP_FIXED + 4 || m[0] != 2 || get32(m + 4) != xid
+        || get32(m + DHCP_FIXED) != DHCP_MAGIC)
+        return false;
+    memset(r, 0, sizeof(*r));
+    r->ip = get32(m + 16);
+    for (size_t o = DHCP_FIXED + 4; o < n;) {
+        uint8_t code = m[o];
+        if (code == 255)
+            break;
+        if (code == 0) {                       /* padding */
+            o++;
+            continue;
+        }
+        if (o + 2 > n || o + 2 + m[o + 1] > n)
+            return false;                      /* an option runs past the end */
+        const uint8_t *v = m + o + 2;
+        uint8_t len = m[o + 1];
+        if (code == 53 && len == 1) r->type = v[0];
+        if (code == 1 && len == 4)  r->netmask = get32(v);
+        if (code == 3 && len >= 4)  r->router = get32(v);
+        if (code == 6 && len >= 4)  r->dns = get32(v);
+        if (code == 51 && len == 4) r->lease_s = get32(v);
+        if (code == 54 && len == 4) r->server = get32(v);
+        o += 2 + (size_t)len;
+    }
+    return r->type != 0 && r->ip != 0;
+}
+
+/* Broadcast one DHCP message (1 = discover, 3 = request) and wait for an
+ * answer of type `want` (2 = offer, 5 = ack; 6 = nak also ends it). */
+static net_status_t dhcp_exchange(uint8_t type, uint32_t xid, const struct net_dhcp_reply *offer,
+                                  uint8_t want, struct net_dhcp_reply *r, unsigned timeout_ms)
+{
+    static const uint8_t bcast[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    uint64_t end = now_ms() + timeout_ms;
+    while (now_ms() < end) {
+        {
+            SPIN_GUARD(&net_lock);
+            udp_wait.port = 68;
+            udp_wait.ready = false;
+            uint8_t *u = frame_out + 34, *d = u + 8;
+            memset(d, 0, DHCP_FIXED + 64);
+            d[0] = 1;                          /* a request from a client */
+            d[1] = 1;                          /* Ethernet */
+            d[2] = 6;
+            put32(d + 4, xid);
+            put16(d + 10, 0x8000);             /* please answer by broadcast */
+            memcpy(d + 28, my_mac, 6);
+            put32(d + DHCP_FIXED, DHCP_MAGIC);
+            uint8_t *o = d + DHCP_FIXED + 4;
+            *o++ = 53; *o++ = 1; *o++ = type;
+            if (offer != NULL) {
+                *o++ = 50; *o++ = 4; put32(o, offer->ip); o += 4;
+                *o++ = 54; *o++ = 4; put32(o, offer->server); o += 4;
+            }
+            *o++ = 55; *o++ = 3; *o++ = 1; *o++ = 3; *o++ = 6;   /* mask, router, DNS */
+            *o++ = 255;
+            size_t len = (size_t)(o - d);
+            put16(u, 68);
+            put16(u + 2, 67);
+            put16(u + 4, (uint16_t)(8 + len));
+            put16(u + 6, 0);
+            ip_send_locked(bcast, 0xFFFFFFFFu, PROTO_UDP, 8 + len);
+        }
+        uint64_t retry = now_ms() + 1000;
+        while (now_ms() < retry && now_ms() < end) {
+            net_poll();
+            bool got = false;
+            {
+                SPIN_GUARD(&net_lock);
+                if (udp_wait.ready) {
+                    got = net_dhcp_parse(udp_wait.data, udp_wait.len, xid, r);
+                    udp_wait.ready = false;
+                }
+            }
+            if (got && (r->type == want || r->type == 6))
+                return r->type == 6 ? NET_ERR_REFUSED : NET_OK;
+            sched_sleep(1);
+        }
+    }
+    return NET_ERR_TIMEOUT;
+}
+
+net_status_t net_dhcp(unsigned timeout_ms)
+{
+    if (!up)
+        return NET_ERR_NO_CARD;
+    uint32_t xid = (uint32_t)rdtsc();
+    uint32_t old_ip;
+    {
+        SPIN_GUARD(&net_lock);
+        old_ip = my_ip;
+        my_ip = 0;                             /* no address until the lease */
+    }
+    struct net_dhcp_reply offer, ack;
+    net_status_t st = dhcp_exchange(1, xid, NULL, 2, &offer, timeout_ms);
+    if (st == NET_OK)
+        st = dhcp_exchange(3, xid, &offer, 5, &ack, timeout_ms);
+    SPIN_GUARD(&net_lock);
+    udp_wait.port = 0;
+    if (st != NET_OK) {
+        my_ip = old_ip;                        /* keep what worked before */
+        return st;
+    }
+    my_ip = ack.ip;
+    netmask = ack.netmask != 0 ? ack.netmask : 0xFFFFFF00u;
+    gateway = ack.router != 0 ? ack.router : gateway;
+    dns_server = ack.dns != 0 ? ack.dns : dns_server;
+    lease_s = ack.lease_s;
+    from_dhcp = true;
+    return NET_OK;
 }
 
 /* ---- TCP ------------------------------------------------------------------ */
@@ -481,7 +616,7 @@ static void tcp_emit_locked(struct tcp_conn *c, uint32_t seq, uint8_t flags, con
     if (len > 0)
         memcpy(t + hl, data, len);
     uint8_t pseudo[12];
-    put32(pseudo, MY_IP);
+    put32(pseudo, my_ip);
     put32(pseudo + 4, c->rip);
     pseudo[8] = 0;
     pseudo[9] = PROTO_TCP;
@@ -744,7 +879,8 @@ static void ip_input_locked(const uint8_t *src_mac, const uint8_t *ip, size_t n)
     size_t ihl = (size_t)(ip[0] & 0x0F) * 4, total = get16(ip + 2);
     if (ihl < 20 || total < ihl || total > n || (get16(ip + 6) & 0x3FFF) != 0)
         return;                               /* bad, or a fragment */
-    if (get32(ip + 16) != MY_IP || sum_fold(sum_add(0, ip, ihl)) != 0)
+    uint32_t dst = get32(ip + 16);              /* DHCP answers may be broadcast */
+    if ((dst != my_ip && !(dst == 0xFFFFFFFFu && ip[9] == PROTO_UDP)) || sum_fold(sum_add(0, ip, ihl)) != 0)
         return;
     uint32_t src = get32(ip + 12);
     const uint8_t *p = ip + ihl;
@@ -783,6 +919,15 @@ bool net_init(void)
         return false;
     e1000_mac(my_mac);
     up = true;
+    char ip[16], gw[16], dns[16];
+    net_status_t st = net_dhcp(3000);
+    net_format_ip(my_ip, ip);
+    net_format_ip(gateway, gw);
+    net_format_ip(dns_server, dns);
+    if (st == NET_OK)
+        kprintf("[net] DHCP gave us %s (gateway %s, name server %s, lease %u s)\n", ip, gw, dns, lease_s);
+    else
+        kprintf("[net] DHCP: %s; using the fixed address %s\n", net_status_str(st), ip);
     return true;
 }
 

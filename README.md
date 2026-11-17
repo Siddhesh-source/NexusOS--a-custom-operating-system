@@ -2,304 +2,219 @@
 
 # BharatOS
 
-**A from-scratch x86-64 operating system that checks itself, explains
-itself, and is made for the people who use it.**
+### An operating system written from scratch: kernel, desktop, network stack and apps, with no Linux underneath.
 
-![Architecture](https://img.shields.io/badge/arch-x86--64-blue)
-![Language](https://img.shields.io/badge/language-C%20%7C%20NASM-informational)
-![Boot](https://img.shields.io/badge/boot-Limine%20(BIOS%20%2B%20UEFI)-orange)
-![Tests](https://img.shields.io/badge/boot%20tests-622%20passing-brightgreen)
-![Network](https://img.shields.io/badge/TCP%2FIP-from%20scratch-teal)
-![Status](https://img.shields.io/badge/progress-Phase%2011%20of%2023-yellow)
+**It checks itself on every boot, explains itself in plain words, and is made for the people of Bharat.**
+
+![Arch](https://img.shields.io/badge/arch-x86--64-blue)
+![Language](https://img.shields.io/badge/C%20%2B%20NASM%20%2B%20Rust-informational)
+![Boot](https://img.shields.io/badge/boot-BIOS%20%2B%20UEFI-orange)
+![Self-checks](https://img.shields.io/badge/boot%20self--checks-707%20passing-brightgreen)
+![CPUs](https://img.shields.io/badge/SMP-up%20to%2016%20CPUs-purple)
+![TCP/IP](https://img.shields.io/badge/TCP%2FIP-from%20scratch-teal)
+![Languages](https://img.shields.io/badge/UI-English%20%C2%B7%20%E0%A4%B9%E0%A4%BF%E0%A4%A8%E0%A5%8D%E0%A4%A6%E0%A5%80%20%C2%B7%20%E0%A4%AE%E0%A4%B0%E0%A4%BE%E0%A4%A0%E0%A5%80-orange)
+
+<img src="docs/screenshots/code.png" width="860" alt="The Code app running on BharatOS">
 
 </div>
 
 ---
 
-## Built from nothing. Every layer.
+## In one minute
 
-A kernel, a multi-core scheduler, a window system, **a TCP/IP stack, a
-web browser, a video player and a code editor**, all written from
-scratch for BharatOS, with no Linux and no borrowed kernel underneath.
-It boots, checks itself with **622 self-checks**, logs you in, plays a
-film clip, and fetches web pages over its own TCP, every time
-`python build.py test` runs.
+BharatOS is a complete, bootable operating system built from the first
+instruction up: about **21,700 lines of kernel C and assembly**, plus a
+Rust service. It boots on real PC firmware (BIOS and UEFI), uses every CPU
+core, and runs a graphical desktop with its own **web browser, video
+player, code editor, file manager and terminal**. It also has **its own
+TCP/IP network stack**, written from scratch.
 
-| New in this round | |
+Three things set it apart:
+
+| | |
 |---|---|
-| 🌐 **Network stack** | own Intel e1000 driver, ARP, IPv4, ICMP, UDP, DNS, TCP and HTTP: `ping`, `host`, `fetch` |
-| 🧭 **Browser** | address bar, links, Back, headings and lists; web pages and local HTML |
-| 🎬 **Player** | plays Big Buck Bunny (Blender Foundation, CC BY) at 12 frames a second |
-| 💻 **Code** | an explorer, line numbers, colours for C, Python, shell and Markdown, Run for scripts |
-| 🗂️ **Files** | Places (Home, Code, Videos, Web pages, Documents, Whole disk) and a disk bar; each file opens in the right app |
-| ⌨️ **Terminal** | Tab completion; `tree cp mv head wc grep df net ping host fetch` |
-| 🚀 **2 GB of RAM** | room for videos, pages and code |
+| 🩺 **It proves itself on every boot** | **707 self-checks** run inside the kernel each time it starts: memory, scheduler, locks, files, network, every app. Every `python build.py test` then logs in, types commands, **fetches a real web page over its own TCP**, drives the desktop and checks a screenshot. A failure is reported, never hidden. |
+| 💬 **It explains itself** | `why slow` and `why crash` answer in plain sentences from live system data, offline, with no AI guesswork. A crashed program is contained and explained; the system keeps running. |
+| 🇮🇳 **It is made for Bharat** | The login screen greets you in **Hindi and Marathi** (नमस्ते · नमस्कार), and one key switches it to English, हिन्दी or मराठी. Next: running in 128 MB and working offline. |
 
-Read the ideas in plain words: [CONCEPTS.md](CONCEPTS.md) ·
-quick wins: [QUICK_WINS.md](QUICK_WINS.md) · the finishing plan: [FINAL.md](FINAL.md)
+## See it
 
-## Why BharatOS
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/login-hindi.png" alt="Login screen in Hindi"><br><sub><b>Login in Hindi.</b> F1 switches English · हिन्दी · मराठी; phrases are shaped at build time, so the kernel needs no shaping engine.</sub></td>
+<td width="50%"><img src="docs/screenshots/browser.png" alt="Browser"><br><sub><b>Browser.</b> Pages fetched over BharatOS's own TCP/IP, with links, Back, bookmarks and history.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/player.png" alt="Video player full screen"><br><sub><b>Player.</b> Video full screen, a playlist of every clip in the folder, no codec needed. (Big Buck Bunny © Blender Foundation, CC BY.)</sub></td>
+<td><img src="docs/screenshots/term.png" alt="Terminal"><br><sub><b>Terminal.</b> 36 commands, Tab completion, colours, 200 lines of scrollback, <code>ping</code>, <code>fetch</code>, <code>why</code>.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/files.png" alt="Files"><br><sub><b>Files.</b> Places, a disk bar, copy, paste, rename; every file opens in the app that suits it.</sub></td>
+<td><img src="docs/screenshots/code.png" alt="Code editor"><br><sub><b>Code.</b> Tabs, find (Ctrl+F), colours for C, Python, shell and Markdown, and Run for scripts.</sub></td>
+</tr>
+</table>
 
-Operating systems fail people in everyday ways: a power cut breaks a file,
-an old laptop crawls, an app reads your photos without asking, and nothing
-ever tells you *why*. BharatOS is built around fixing those problems with
-simple, solid engineering.
+## What is inside
 
-| | What it means for you | Status |
-|---|---|---|
-| ✅ **Checks itself on every boot** | 566 health checks run inside the kernel each time it starts; problems are reported, never hidden, and shown on the desktop | working today |
-| 💬 **Explains itself** | `why slow`, `why crash`: plain sentences from real system data, offline | Phase 15 |
-| ↩️ **Undo for your files** | saves never overwrite data, so power cuts can't corrupt files and every change can be undone | Phase 17 |
-| 🔒 **Apps ask first** | apps start with no access; you allow or deny; every use is logged | Phase 18 |
-| 🇮🇳 **Made for Bharat** | runs in 128 MB of RAM, works offline, speaks Hindi and Marathi | Phase 22 |
-
-A full V1 desktop works today (Terminal, Files, Code, Browser, Player, Monitor, Health, About); the final polish comes in Phase 21.
-More detail: [Project overview](docs/PROJECT_OVERVIEW.md).
-
-## What works today
-
-```text
-[sched] Round-robin scheduler: 100 Hz timer, quantum 2 ticks (20 ms)
-[test]   CPU handed out in this order: A B C A B C A B C A B C ...
-  Thread A :  26 time slices,  52 CPU ticks
-  Thread B :  26 time slices,  52 CPU ticks
-  Thread C :  25 time slices,  50 CPU ticks
-[test] ===== 26 passed, 0 failed =====
-
-[ok] Phase 3 memory management verified.
-[ok] Phase 4 process management verified.
-[ok] Phase 5 scheduler verified.
-[ok] Phase 6 debug and hardening verified.
-[ok] Phase 7 modern hardware verified.
-[ok] Phase 8 memory that scales verified.
-[ok] Phase 9 multi-core verified.
-[ok] Phase 10 input verified.
-[ok] Phase 10 files in memory verified.
-[ok] Phase 10 login and shell verified.
-[ok] Phase 11 desktop verified.
-[desktop] Login screen ready (type your name in the QEMU window).
-[desktop] Desktop ready for asha.
-
-BharatOS login: asha
-Hello, asha! Type 'help' to see what you can do.
-asha@bharat:~$ echo hi > a.txt
-asha@bharat:~$ cat a.txt
-hi
+```mermaid
+flowchart TB
+    subgraph APPS["Desktop and apps (V1: kernel threads behind narrow APIs)"]
+        direction LR
+        T[Terminal + shell<br/>36 commands, why]
+        F[Files]
+        C[Code]
+        B[Browser]
+        P[Player]
+        M[Monitor / Health]
+    end
+    subgraph UI["Graphics"]
+        direction LR
+        WM[Window manager<br/>damage-only redraws]
+        G[Smooth fonts,<br/>Devanagari phrases]
+    end
+    subgraph SVC["Services"]
+        direction LR
+        NET[TCP/IP stack<br/>DHCP · ARP · IPv4 · ICMP · UDP · DNS · TCP · HTTP]
+        FS[Files in RAM<br/>loaded from a boot bundle]
+        RS[Rust service<br/>no_std]
+    end
+    subgraph K["Kernel core (C + NASM)"]
+        direction LR
+        SCH[Tickless SMP scheduler<br/>per-CPU queues, work stealing]
+        MM[Memory<br/>buddy · slab · paging · copy-on-write]
+        SMP[Spinlocks with a<br/>lock-order checker · RCU · TLB shootdown]
+        DBG[Crash reports with call traces<br/>stack canaries · heap poisoning]
+    end
+    subgraph HW["Hardware"]
+        direction LR
+        H1[ACPI · APIC · HPET · PCI]
+        H2[e1000 network card · PS/2 · framebuffer · serial]
+    end
+    APPS --> UI --> SVC --> K --> HW
 ```
 
-| Area | What's implemented |
+| Layer | Highlights |
 |---|---|
-| **Boot** | Limine (BIOS and UEFI), 64-bit kernel in high memory, serial console, a splash screen whose progress bar follows the real boot steps |
-| **Hardware** | ACPI tables (CPUs, interrupt controllers, HPET, PCIe), PCI device scan, local and I/O APIC |
-| **CPU** | crash handlers for all 32 CPU errors with full reports, emergency stack for double faults, calibrated clock with one-shot alarms |
-| **Memory** | buddy page allocator, slab caches, kernel heap, own page tables (read-only code, no-execute data), one address space per process, pages allocated on first touch, copy-on-write, shareable memory objects |
-| **Multi-core** | all CPUs started, per-CPU data and run queues, work stealing, named spinlocks with a lock-order checker, TLB shootdown, RCU lookups |
-| **Threads** | processes and kernel threads, own guarded stack per thread, assembly context switch |
-| **Scheduler** | preemptive time-sharing (20 ms slices), tickless (an idle CPU gets no timer interrupts), idle thread, sleep, live statistics |
-| **Safety** | crashes of a demo thread are reported and contained (the system keeps running), guard pages, stack canaries, compiler stack protector, heap poisoning and red zones (use-after-free and overflow caught), corrupted-state detection, interrupt-safe allocators |
-| **Input** | PS/2 keyboard and mouse for the desktop, typing in a terminal (serial) for the text console, both at once; threads sleep until a key arrives |
-| **Files** | files and folders in memory (up to 4 MB each, 32 MB in all), filled at boot from a bundle on the disk; size limits checked |
-| **Network** | Intel e1000 driver (polled DMA rings), ARP, IPv4, ICMP ping, UDP, DNS, TCP (resends, in-order delivery), HTTP/1.0 with redirects |
-| **Terminal** | login with your name, a shell with 35 commands (`ls cat cp mv tree grep wc head df net ping host fetch cpus top checks` ...), Tab completion, history with the arrow keys |
-| **Desktop** | graphical login with your name; windows you can focus, drag and close; a top bar with your apps, CPU count, health badge and clock; drawn in memory and copied to the screen only where it changed |
-| **Apps** | Terminal, Files (Places, disk bar, open with the right app), Code (explorer, line numbers, colours, Run), Browser (HTTP and local HTML, links, Back), Player (video), Text editor, Monitor (every CPU's load live), Health (checks, lock-order and crash demos), About; a scripted tour (F12) |
-| **Debugging** | crash reports with named call traces and the last 16 kernel events, GDB/LLDB attach mode, host unit tests, benchmarks, size and boot-time budgets, CI |
+| **Boot** | Limine on BIOS and UEFI; a splash whose progress bar follows the real boot steps and ends with the measured boot time |
+| **CPU and memory** | all 32 CPU exceptions with full reports; buddy page allocator, slab caches, own page tables (read-only code, no-execute data), demand paging, copy-on-write |
+| **Multi-core** | every CPU started; per-CPU run queues with work stealing; tickless timer (idle CPUs get no interrupts); spinlocks checked for lock-order mistakes; RCU; TLB shootdown |
+| **Safety** | crashes of apps are contained and reported with named call traces; guard pages, stack canaries, heap poisoning and red zones |
+| **Network** | Intel e1000 driver; DHCP, ARP, IPv4, ICMP, UDP, DNS, TCP with resends, HTTP/1.0 |
+| **Desktop** | windows, dock, top bar with a live health badge, smooth anti-aliased fonts, screenshots (Print Screen), full-screen apps |
+| **Rust** | a `no_std` Rust service built by an optional step and run on its own thread; the build still works without `rustc` |
 
-Full boot log: [docs/logs/boot-output.md](docs/logs/boot-output.md)
+## How it proves itself
+
+```mermaid
+flowchart LR
+    A[python build.py test] --> B[Build kernel<br/>+ disk image]
+    B --> C[Boot in QEMU<br/>4 CPUs]
+    C --> D[707 self-checks<br/>inside the kernel]
+    D --> E[Type a login and<br/>commands over serial]
+    E --> F[Fetch a page served<br/>by the PC over TCP]
+    F --> G[Log in to the desktop<br/>and run the tour]
+    G --> H[Check a screenshot,<br/>boot time and size budgets]
+    H --> I{exit 0?}
+```
+
+- **707 boot self-checks** in 12 suites (memory, processes, scheduler,
+  debugging, hardware, scaling memory, multi-core, input, files, shell,
+  desktop, network and apps). They pass with 1 and 4 CPUs.
+- **About 4 million host unit-test cases** run against the real heap,
+  scheduler, buddy and slab code (`python build.py unit`).
+- **13 crash-on-purpose kernels** check that every crash report is right
+  (`python build.py test-faults`).
+- **Budgets:** kernel size and boot time are checked on every run, and
+  zero compiler warnings are allowed. CI boots every pull request.
 
 ## Quick start
 
-**Requirements:** Python 3.9+, Clang/LLD 14+, NASM, QEMU 7+ (plus OVMF for UEFI).
+**Needs:** Python 3.9+, Clang/LLD, NASM, QEMU (OVMF for UEFI). Rust is optional.
 
 ```bash
 git clone https://github.com/Siddhesh-source/BharatOS.git
 cd BharatOS
-python scripts/fetch_limine.py     # one-time: download the bootloader
-python build.py demo               # build and boot with the desktop in a QEMU window
+python scripts/fetch_limine.py     # once: the bootloader
+python build.py demo               # the desktop in a QEMU window
 ```
 
-Type your name in the window and press Enter. Click into the window to
-use the mouse (Ctrl+Alt+G lets it go); F12 starts a tour of the desktop.
-
-Things to try: open **Player** for the film clip; open **Browser** and
-click *example.com* (QEMU's network reaches the internet through your
-PC); open **Code** and press Run on `demo.sh`; in **Terminal**, type
-`ping 10.0.2.2`, `fetch http://example.com/` or `tree /`, and press Tab
-to complete names. To browse pages from your own PC, run
-`python -m http.server 8000` there and open `http://10.0.2.2:8000/`.
-
-Quit QEMU with **Ctrl+A**, then **X**.
+Type your name (or press **F1** first for Hindi or Marathi), then Enter.
+Try **Player**, **Browser → example.com**, **Code → Run** on `demo.sh`, or
+in the Terminal: `why slow`, `ping 10.0.2.2`, `fetch http://example.com/`,
+`ls /`. Press **F12** for a hands-free tour. To quit QEMU, press
+**Ctrl+A** then **X**.
 
 | Command | What it does |
 |---|---|
-| `python build.py` | Build the kernel and bootable disk image |
-| `python build.py demo` | Boot with the desktop in a QEMU window and the text console in the terminal; `--auto` logs in and runs the tour by itself |
-| `python build.py run` | Boot in QEMU (BIOS) in the terminal; log in and type commands there |
-| `python build.py run --window` | Same, plus a QEMU window showing the screen (type in either) |
-| `python build.py run-uefi` | Boot through UEFI firmware (OVMF) |
-| `python build.py test` | Boot and verify every self-test and the budgets (exit code 0 = pass); `--smp N` sets the CPU count (default 4) |
-| `python build.py test-faults` | Verify all 13 crash-on-purpose demos are caught and reported |
-| `python build.py run --fault-demo <name>` | Boot, then crash on purpose: `pf` `null` `stack` `de` `ud` `df` `ctx` `tstack` `panic` `smash` `uaf` `overflow` `lockorder` |
-| `python build.py unit` | Run heap and scheduler unit tests on this machine (millions of cases, seconds) |
-| `python build.py bench` | Measure switch, heap and trace costs; add a row to [docs/benchmarks.md](docs/benchmarks.md) |
-| `python build.py debug` | Start QEMU paused for a debugger; then `gdb -x scripts/bharat.gdb` |
-| `python build.py clean` | Remove build output |
+| `python build.py demo [--auto]` | the desktop in a window (`--auto`: tour by itself) |
+| `python build.py run [--window]` | boot with the text console in this terminal |
+| `python build.py run-uefi` | boot through UEFI firmware |
+| `python build.py test [--smp N]` | build, boot and verify everything (exit 0 = pass) |
+| `python build.py test-faults` | 13 crash-on-purpose kernels, each report checked |
+| `python build.py unit` | host unit tests (millions of cases, seconds) |
+| `python build.py bench` | benchmarks into [docs/benchmarks.md](docs/benchmarks.md) |
+| `python build.py debug` | QEMU paused for GDB/LLDB |
 
-<details>
-<summary><b>Windows setup</b></summary>
+<details><summary><b>Windows / Linux setup</b></summary>
 
-If the tools are not on `PATH`, copy `.env.example` to `.env` and set:
+**Windows:** if the tools are not on `PATH`, copy `.env.example` to
+`.env` and set `BHARAT_CLANG`, `BHARAT_LLD`, `BHARAT_OBJCOPY`,
+`BHARAT_NASM`, `BHARAT_QEMU` (and `BHARAT_OVMF_*` for UEFI). Run
+`chcp 65001` for box-drawing characters.
 
-```ini
-BHARAT_CLANG=C:\Program Files\LLVM\bin\clang.exe
-BHARAT_LLD=C:\Program Files\LLVM\bin\ld.lld.exe
-BHARAT_OBJCOPY=C:\Program Files\LLVM\bin\llvm-objcopy.exe
-BHARAT_NASM=C:\Tools\NASM\nasm.exe
-BHARAT_QEMU=C:\qemu\qemu-system-x86_64.exe
-BHARAT_OVMF_CODE=C:\qemu\share\edk2-x86_64-code.fd
-BHARAT_OVMF_VARS=C:\qemu\share\edk2-i386-vars.fd
-```
+**Linux / WSL:** `sudo apt install python3 clang lld llvm nasm qemu-system-x86 ovmf`
 
-Run `chcp 65001` first so the box-drawing characters display correctly.
-
+**Rust (optional):** `rustup target add x86_64-unknown-none`. Without it,
+the build says so and goes on; `BHARAT_NO_RUST=1` skips Rust on purpose.
 </details>
 
-<details>
-<summary><b>Linux / WSL setup</b></summary>
+## Where it is going
 
-```bash
-sudo apt install python3 clang lld llvm nasm qemu-system-x86 ovmf
+```mermaid
+flowchart LR
+    A["✅ Phases 1–9<br/>boot · memory · threads<br/>scheduler · multi-core"] --> B["✅ V1 desktop<br/>apps · network · video<br/>code · Hindi/Marathi"]
+    B --> C["12 · hardening<br/>fuzzing · real laptop"]
+    C --> D["13–14 · user mode<br/>handles · async rings<br/>microkernel IPC"]
+    D --> E["15–19 · why service<br/>undo for files · apps ask first<br/>HTTPS"]
+    E --> F["20–23 · resume and replay<br/>WebAssembly apps<br/>128 MB machines"]
 ```
 
-No `.env` needed; tools and OVMF are found automatically.
-
-</details>
-
-## Architecture
-
-```text
-┌────────────────────────────────────────────────────────────────┐
-│  Desktop & apps: Home · Terminal · Files · Why? · Settings     │  Ph 18
-├────────────────────────────────────────────────────────────────┤
-│  Services: shell · explain · files with undo · permissions     │  Ph 11–15
-├══════════  async rings + handles (user ↔ kernel)  ═════════════┤  Ph 10
-│  Debug & hardening  call traces · canaries · heap poisoning    │  ✅ 6
-│  Scheduler          round-robin · preemption · idle            │  ✅ 5
-│  Processes/Threads  kernel stacks · context switch             │  ✅ 4
-│  Memory             pages · page tables · heap · page faults   │  ✅ 3
-│  CPU & Interrupts   GDT/TSS · IDT · exceptions · timer         │  ✅ 2
-│  Boot               Limine · 64-bit mode · serial              │  ✅ 1
-└────────────────────────────────────────────────────────────────┘
-```
-
-Design details: [high-level design](docs/design/HLD.md) ·
-[low-level design](docs/design/LLD.md) · [desktop look](docs/design/UI.md)
-
-## Testing
-
-Every boot runs **622 checks** inside the kernel, then logs in and types commands at the real prompt, **fetches a web page served by the PC over BharatOS's own TCP**, logs in to the desktop with the emulated keyboard, runs the quick desktop tour (which checks its own results) and checks a screenshot:
-
-| Suite | Checks | Highlights |
+| Promise | Today | Next |
 |---|---|---|
-| Memory | 114 | allocator exhaustion, page permissions, invalid-access faults, heap integrity |
-| Processes | 83 | exact switch trace, register preservation, 60 000-switch stress, stack isolation |
-| Scheduler | 26 | preemption of non-yielding threads, all 15 registers preserved, fairness, idle |
-| Debug & hardening | 29 | symbol lookup, call-trace walk, random canary, use-after-free and overflow detection, event trace |
-| Hardware | 38 | ACPI tables, PCI list, screen text, PIC masked, sleep accuracy, tickless idle, I/O APIC routing |
-| Memory that scales | 62 | buddy split/merge, slab limits and poisoning, demand paging, copy-on-write, shared objects |
-| Multi-core | 29 | lost-update stress on all CPUs, lock-order inversion caught, TLB shootdown, RCU, work stealing |
-| Input | 32 | key, terminal and mouse decoding, full queue, keys through the real IRQ 1 / IRQ 12 path, sleeping readers |
-| Files | 46 | paths, create/read/write/list/delete, bad paths, every size limit, the boot bundle |
-| Login and shell | 58 | line editor, login rules, scripted commands with checked output, contained crashes |
-| Desktop | 53 | drawing and clipping, damage-only redraws, windows (focus, drag, close, limits), login screen, every app driven by keys and clicks |
-| Network and apps | 53 | ARP and ping to the gateway, bad addresses and URLs refused, Code (typing, indent, save, Run), Player (frames follow the clock, pause, seek), Browser (HTML, entities, scripts hidden, links, Back, https refused), Files places, new shell commands, Tab completion |
+| Checks itself | ✅ 707 checks on every boot, health badge on the desktop | fuzzing, real hardware |
+| Explains itself | ✅ `why slow`, `why crash` | a `why` service for every part |
+| Crash-proof apps | ✅ contained crashes in kernel threads | user mode: an app crash can never touch the kernel |
+| Undo for files | files in RAM | BharatFS: copy-on-write, safe from power cuts |
+| Apps ask first | narrow APIs | handles (capabilities) and permission prompts |
+| Made for Bharat | ✅ Hindi and Marathi login | 128 MB, offline-first, more languages |
 
-Outside the kernel, `python build.py unit` runs about **2.8 million** checks
-on the real heap and scheduler code (random operations against a model),
-plus 1.26 million on the buddy allocator and slab caches,
-and `test-faults` crashes the kernel on purpose 13 ways to check every
-report. CI builds and boots every pull request.
+The full plan and its reasons: [docs/UPDATES.md](docs/UPDATES.md) ·
+the fastest path to finished: [FINAL.md](FINAL.md) ·
+what's next: [WAY_AHEAD.md](WAY_AHEAD.md) · quick wins: [QUICK_WINS.md](QUICK_WINS.md)
 
-All suites pass under BIOS and UEFI with zero compiler warnings.
+## Documentation
 
-## Roadmap
-
-- [x] **1–5:** boot, interrupts, memory, threads, preemptive scheduler
-- [x] **6:** debug and hardening: call traces, stack protector, heap poisoning, unit tests, benchmarks, CI
-- [x] **7:** modern hardware: ACPI, APIC, PCI, tickless timer, screen console
-- [x] **8:** memory that scales: buddy, slab, demand paging, copy-on-write
-- [x] **9:** multi-core: per-CPU queues, spinlocks with lock-order checking, TLB shootdown, RCU
-- [x] **10:** V1 core: keyboard and mouse, files in RAM, login with your name, terminal
-- [x] **11:** V1 desktop and demo: windows, top bar, Terminal, Files, editor, Monitor, Health, tour
-- [x] **V1 extras:** 2 GB RAM, TCP/IP stack and e1000 driver, Browser, Player, Code, Files places, Tab completion
-- [ ] **12:** V1 hardening: thorough tests, fuzzing, screenshots, real hardware
-- [ ] **13–14:** user mode with handles and async rings; microkernel IPC and services
-- [ ] **15:** self-check and explain (`why`)
-- [ ] **16–17:** drivers as services; BharatFS with undo, safe from power cuts
-- [ ] **18–19:** permissions and verified boot; networking as a service (HTTPS, DHCP; the stack itself already works)
-- [ ] **20–21:** resume, replay and live migration; desktop polish and WebAssembly apps
-- [ ] **22–23:** made for Bharat (Hindi/Marathi, 128 MB, real hardware); extras
-
-What's next and why: [WAY_AHEAD.md](WAY_AHEAD.md). The fastest path to a finished OS: [FINAL.md](FINAL.md).
-
-The current plan and its reasons: [docs/UPDATES.md](docs/UPDATES.md).
-
-Step-by-step plan with tests for each phase: [docs/ROADMAP.md](docs/ROADMAP.md)
+| Read | For |
+|---|---|
+| [CONCEPTS.md](CONCEPTS.md) | the ideas in plain words |
+| [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md) | why the project exists, the selling points |
+| [docs/design/HLD.md](docs/design/HLD.md) · [LLD.md](docs/design/LLD.md) · [UI.md](docs/design/UI.md) | how it fits together, exact structures, the look |
+| [docs/phases/](docs/phases/) | how each finished phase works and is tested |
+| [docs/BUG_JOURNAL.md](docs/BUG_JOURNAL.md) | hard bugs: symptom, cause, fix, guarding test |
+| [CLAUDE.md](CLAUDE.md) | the contributor guide |
 
 ## Project structure
 
 ```text
-├── build.py              build, run and test entry point
-├── CLAUDE.md             guide for contributors and AI agents
-├── PROMPT.md             ready-made prompts for AI-assisted development
-├── boot/                 Limine configuration; bundle/ = files loaded at boot
-├── .github/workflows/     CI: build, unit tests, one boot test
-├── scripts/              disk image writer, QEMU test harness, symbol table, budgets, GDB script
-├── kernel/
-│   ├── arch/x86_64/      entry, linker script, GDT/TSS, IDT, interrupts, APIC, clock, context switch
-│   ├── acpi/             ACPI tables (MADT, HPET, MCFG)
-│   ├── pci/              PCI device scan
-│   ├── core/             kernel_main, panic, contained crashes
-│   ├── mm/               buddy allocator, slab caches, page tables, heap, memory objects, page faults
-│   ├── proc/             processes, threads, kernel stacks
-│   ├── sched/            scheduler (per-CPU run queues), wait queues
-│   ├── smp/              CPU start-up, per-CPU data, spinlocks, IPIs, RCU
-│   ├── drivers/          serial, screen console, real-time clock
-│   ├── input/            keyboard, mouse and serial input, event queue
-│   ├── fs/               files in memory (ramfs) and the boot bundle
-│   ├── net/              e1000 network card driver; ARP, IP, ICMP, UDP, DNS, TCP, HTTP
-│   ├── apps/             V1 apps: login console, shell, Terminal, Files, Code, Browser, Player, ...
-│   ├── ui/               graphics, boot splash, window manager, desktop, tour
-│   ├── lib/              kprintf, string, box drawing
-│   ├── trace/            call traces (symbol table) and the event trace
-│   ├── include/          limine.h
-│   └── tests/            boot-time self-tests and benchmarks
-├── tests/unit/           host-side unit tests (heap, scheduler, buddy, slab)
-├── user/                 user programs and apps (Phase 10+)
-└── docs/
-    ├── PROJECT_OVERVIEW.md, ROADMAP.md
-    ├── design/           HLD, LLD, UI
-    ├── phases/           one document per finished phase
-    └── logs/             boot output captures
+build.py          the only build entry point (build, run, test, unit, bench)
+boot/             Limine config; bundle/ = files loaded into RAM at boot
+kernel/           arch/ acpi/ pci/ mm/ proc/ sched/ smp/ core/ drivers/
+                  input/ fs/ net/ ui/ apps/ trace/ tests/
+user/services/    hello-rs: the first Rust service (no_std)
+scripts/          disk image, test harness, fonts, video, budgets
+tests/unit/       host unit tests (no C library)
+docs/             plan, designs, phase notes, logs, screenshots
 ```
 
-## Documentation
-
-| Document | Contents |
-|---|---|
-| [Concepts](CONCEPTS.md) | how an operating system works, in plain words |
-| [Quick wins](QUICK_WINS.md) | low-effort, high-impact features: done and next |
-| [Final plan](FINAL.md) | what "finished" means and the fastest order to get there |
-| [Project overview](docs/PROJECT_OVERVIEW.md) | the problems, the 5 USPs, talking points |
-| [Plan updates](docs/UPDATES.md) | **current** architecture, Phases 6–20, decision log (wins over older docs) |
-| [Roadmap](docs/ROADMAP.md) | the original Phase 6–12 plan, step by step (see UPDATES §14 for the mapping) |
-| [High-level design](docs/design/HLD.md) | layers, components, main flows, key decisions |
-| [Low-level design](docs/design/LLD.md) | structs, constants, system calls, disk format |
-| [Desktop design](docs/design/UI.md) | layout, colours, screens |
-| Phase docs: [2](docs/phases/phase-2-interrupts.md) · [3](docs/phases/phase-3-memory.md) · [4](docs/phases/phase-4-processes.md) · [5](docs/phases/phase-5-scheduler.md) · [6](docs/phases/phase-6-debug-hardening.md) · [7](docs/phases/phase-7-modern-hardware.md) · [8](docs/phases/phase-8-memory-that-scales.md) · [9](docs/phases/phase-9-multi-core.md) · [10](docs/phases/phase-10-v1-core.md) | how each finished layer works |
-| [Benchmarks](docs/benchmarks.md) · [Bug journal](docs/BUG_JOURNAL.md) | measured costs over time; hard bugs and how they were found |
-
-## Tech stack
-
-**C11** (freestanding) · **NASM** · **Clang/LLD** · **Limine** ·
-**QEMU** · **OVMF** · **Python 3** (build system and test harness)
+**Tech:** C11 (freestanding), NASM, Rust (`no_std`, optional), Clang/LLD,
+Limine, QEMU, Python build and tests. No external libraries in the kernel.

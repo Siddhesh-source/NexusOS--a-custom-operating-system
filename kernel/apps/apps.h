@@ -53,18 +53,30 @@ struct textbuf *app_text(struct window *w);
 bool files_select(struct window *w, const char *name);
 const char *files_selected(struct window *w);
 const char *files_folder(struct window *w);
+/* Files: its message line ("Pasted notes-copy.txt.", ...). */
+const char *files_message(struct window *w);
 
 /* Text editor: its text (0-terminated) and whether it has unsaved changes. */
 const char *editor_text(struct window *w, bool *unsaved);
 
-/* Code: its text, whether it is unsaved, and the Run output. */
+/* Code: its text, whether it is unsaved, and the Run output (of the tab
+ * shown). code_open_tab opens a file in a new tab (or shows its tab);
+ * code_tabs gives the number of tabs, the one shown, its cursor and the
+ * status message. */
+#define CODE_TABS 4
 const char *code_text(struct window *w, bool *unsaved, struct textbuf **out);
+bool code_open_tab(struct window *w, const char *path);
+unsigned code_tabs(struct window *w, unsigned *active, size_t *cursor, const char **msg);
 
 /* Player: a .bvid file's header is sound; the frame being shown, frames
  * drawn so far and whether it is playing. */
 bool player_parse(const uint8_t *d, size_t size, uint16_t *w, uint16_t *h, uint16_t *fps,
                   uint16_t *frames);
 unsigned player_frame(struct window *w, unsigned *shown, bool *playing);
+/* Player: videos in the playlist, the one playing, its name and the
+ * message line ("" or why a video was skipped). */
+#define PLAYER_LIST_MAX 16
+unsigned player_playlist(struct window *w, unsigned *at, const char **name, const char **msg);
 
 /* Browser: whether the page shows `text`; its address and link count;
  * follow link `i`; go to an address; go back. */
@@ -73,6 +85,11 @@ const char *browser_url(struct window *w, unsigned *links);
 bool browser_follow(struct window *w, unsigned i);
 void browser_go(struct window *w, const char *url);
 void browser_back(struct window *w);
+/* Browser: bookmarks (a file per user) and the pages visited. The status
+ * message line ("Bookmarked", "Already in your bookmarks", ...). */
+#define BOOKMARK_MAX        32
+#define BROWSER_HISTORY_MAX 32
+const char *browser_message(struct window *w);
 
 /* Monitor: busy % of CPU `cpu` over the last second. */
 unsigned monitor_busy(struct window *w, unsigned cpu);

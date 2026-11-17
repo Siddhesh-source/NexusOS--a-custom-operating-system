@@ -22,6 +22,8 @@ static void topbar_refresh(void);
 static struct gfx_rect dock_rect(void);
 static struct gfx_rect damage;
 static struct wm_stats stats;
+static char toast[96];
+static unsigned toast_left;                    /* seconds (wm_tick) */
 
 /* The mouse pointer and a window being dragged. */
 static int32_t px, py;
@@ -96,6 +98,25 @@ struct gfx_surface *wm_back(void)
     return &back;
 }
 
+static struct gfx_rect toast_rect(void)
+{
+    int32_t w = gfx_text_width(toast, FONT_UI) + 40;
+    return gfx_rect((back.w - w) / 2, back.h - 160, w, 38);
+}
+
+void wm_toast(const char *msg)
+{
+    wm_damage(toast_rect());
+    strlcpy(toast, msg != NULL ? msg : "", sizeof(toast));
+    toast_left = 4;
+    wm_damage(toast_rect());
+}
+
+const char *wm_toast_text(void)
+{
+    return toast;
+}
+
 void wm_get_stats(struct wm_stats *out)
 {
     *out = stats;
@@ -163,6 +184,8 @@ void wm_focus(struct window *w)
     order[nwin - 1] = w;
     wm_redraw(old);                         /* its shadow and title go quiet */
     wm_redraw(w);
+    if ((old != NULL && old->full) || w->full)
+        wm_damage_all();                    /* the top bar and dock come or go */
     topbar_refresh();                       /* the top bar names the focused app */
 }
 
@@ -180,6 +203,20 @@ void wm_move(struct window *w, int32_t x, int32_t y)
     w->r.x = x;
     w->r.y = y;
     wm_damage(outer(w));
+}
+
+void wm_fullscreen(struct window *w, bool on)
+{
+    if (w == NULL || !w->used || w->full == on)
+        return;
+    if (on) {
+        w->saved = w->r;
+        w->r = gfx_rect(0, -UI_TITLE_H, back.w, back.h + UI_TITLE_H);
+    } else {
+        w->r = w->saved;
+    }
+    w->full = on;
+    wm_damage_all();
 }
 
 void wm_set_title(struct window *w, const char *title)
@@ -454,9 +491,15 @@ bool wm_compose(void)
         backdrop();
     for (unsigned i = 0; i < nwin; i++)
         draw_window(order[i], i == nwin - 1);
-    if (napps > 0) {
+    struct window *top = wm_focused();
+    if (napps > 0 && (top == NULL || !top->full)) {
         draw_topbar();
         draw_dock();
+    }
+    if (toast[0] != '\0') {
+        struct gfx_rect t = toast_rect();
+        gfx_round(t, 19, COL_CHROME, 230);
+        gfx_text(t.x + 20, t.y + (t.h - gfx_line_height(FONT_UI)) / 2, toast, COL_ON_DARK, FONT_UI);
     }
     if (pointer_shown)
         draw_cursor();
@@ -510,7 +553,8 @@ void wm_mouse(int32_t x, int32_t y, uint8_t b)
     if (!press)
         return;
     struct window *w = window_at(x, y);
-    if (napps > 0 && (y < UI_TOPBAR_H || (w == NULL && gfx_inside(dock_rect(), x, y)))) {
+    bool bars = wm_focused() == NULL || !wm_focused()->full;
+    if (napps > 0 && bars && (y < UI_TOPBAR_H || (w == NULL && gfx_inside(dock_rect(), x, y)))) {
         topbar_click(x, y);
         return;
     }
@@ -545,6 +589,8 @@ void wm_tick(void)
         if (order[i]->app->tick != NULL)
             order[i]->app->tick(order[i]);
     topbar_refresh();                                   /* the clock */
+    if (toast[0] != '\0' && --toast_left == 0)
+        wm_toast("");
 }
 
 /* ---- widgets ------------------------------------------------------------- */
