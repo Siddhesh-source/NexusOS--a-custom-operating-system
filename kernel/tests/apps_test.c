@@ -292,6 +292,52 @@ static void test_player(void)
     wm_close(w);
 }
 
+static void test_browser_bookmarks(struct window *w)
+{
+    const char *bm = "/home/tester/bookmarks.txt";
+    char buf[512];
+    size_t n = 0;
+    unsigned links = 0;
+    fs_unlink(bm);
+    browser_go(w, "about:bookmarks");
+    CHECK(browser_page_has(w, "Ctrl+D") && browser_page_has(w, "bookmarks"), "with no bookmarks the page says how to add one");
+    browser_go(w, "/home/tester/t.html");
+    desktop_key(4);                                     /* Ctrl+D */
+    buf[0] = '\0';
+    if (fs_read_file(bm, buf, sizeof(buf) - 1, &n) == FS_OK)
+        buf[n] = '\0';
+    CHECK(strstr(browser_message(w), "Bookmarked") != NULL && strstr(buf, "/home/tester/t.html\tTest page\n") != NULL,
+          "Ctrl+D bookmarks the page, kept in the user's bookmarks file");
+    desktop_key(4);
+    CHECK(strstr(browser_message(w), "Already") != NULL, "a page is bookmarked only once");
+    static const char tricky[] = "<title>a&lt;b&gt;c</title><p>tricky</p>";
+    fs_write_file("/home/tester/x.html", tricky, sizeof(tricky) - 1, false);
+    browser_go(w, "/home/tester/x.html");
+    desktop_key(4);
+    browser_go(w, "about:bookmarks");
+    browser_url(w, &links);
+    CHECK(browser_page_has(w, "Test") && browser_page_has(w, "a<b>c") && links == 2,
+          "the Bookmarks page lists them as links; a title cannot add tags");
+    browser_follow(w, 0);
+    CHECK(strcmp(browser_url(w, NULL), "/home/tester/t.html") == 0, "a bookmark opens its page");
+    browser_go(w, "about:history");
+    browser_url(w, &links);
+    CHECK(browser_page_has(w, "History") && browser_page_has(w, "Test") && browser_page_has(w, "second.html")
+          && links >= 3, "the History page lists the pages visited");
+    desktop_key(4);
+    CHECK(strstr(browser_message(w), "cannot be bookmarked") != NULL, "the History page itself is not bookmarked");
+    fs_unlink(bm);
+    for (unsigned i = 0; i < BOOKMARK_MAX; i++) {
+        ksnprintf(buf, sizeof(buf), "http://10.0.2.2/%u\tpage %u\n", i, i);
+        fs_write_file(bm, buf, strlen(buf), true);
+    }
+    browser_go(w, "/home/tester/t.html");
+    desktop_key(4);
+    CHECK(strstr(browser_message(w), "full") != NULL, "bookmarks stop at their limit, with a reason");
+    fs_unlink(bm);
+    fs_unlink("/home/tester/x.html");
+}
+
 static void test_browser(void)
 {
     st_section("Browser");
@@ -322,6 +368,7 @@ static void test_browser(void)
           "the start page opens from a link");
     browser_go(w, "https://example.com/");
     CHECK(browser_page_has(w, "Secure") && browser_page_has(w, "TLS"), "a secure address explains why it cannot open");
+    test_browser_bookmarks(w);
     wm_compose();
     wm_close(w);
     fs_unlink("/home/tester/t.html");

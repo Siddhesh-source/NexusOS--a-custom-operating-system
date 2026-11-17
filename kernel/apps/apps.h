@@ -83,6 +83,11 @@ const char *browser_url(struct window *w, unsigned *links);
 bool browser_follow(struct window *w, unsigned i);
 void browser_go(struct window *w, const char *url);
 void browser_back(struct window *w);
+/* Browser: bookmarks (a file per user) and the pages visited. The status
+ * message line ("Bookmarked", "Already in your bookmarks", ...). */
+#define BOOKMARK_MAX        32
+#define BROWSER_HISTORY_MAX 32
+const char *browser_message(struct window *w);
 
 /* Monitor: busy % of CPU `cpu` over the last second. */
 unsigned monitor_busy(struct window *w, unsigned cpu);
