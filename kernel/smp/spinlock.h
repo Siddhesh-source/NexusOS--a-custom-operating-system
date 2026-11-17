@@ -54,6 +54,7 @@ enum lock_class {
     LOCK_CLASS_DEMO_A,      /* the shell's lock-order demo */
     LOCK_CLASS_DEMO_B,
     LOCK_CLASS_NET,         /* the network stack and card */
+    LOCK_CLASS_RUST_SVC,    /* the Rust service mailbox */
     LOCK_CLASS_COUNT
 };
 

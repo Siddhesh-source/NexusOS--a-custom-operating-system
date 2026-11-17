@@ -1,0 +1,18 @@
+# Not used by the build (build.py calls rustc directly, so no cargo and no
+# downloads are needed); here so editors and `cargo check` understand the
+# crate.
+[package]
+name = "hello-rs"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "hello_rs"
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

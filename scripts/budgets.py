@@ -26,8 +26,12 @@ LIMITS = {
     # when the finished desktop (graphics, windows, six apps, the tour)
     # landed at about 16,100 (decision D34), then to 21,500 when the
     # network stack (e1000, ARP, IP, ICMP, UDP, DNS, TCP, HTTP) and the
-    # Code, Browser and Player apps landed at about 20,000 (decision D42).
-    "kernel_lines": 21500,
+    # Code, Browser and Player apps landed at about 20,000 (decision D42),
+    # then to 22,500 when the second round of quick wins (DHCP, why, Hindi
+    # and Marathi login, screenshots, tabs, playlist, bookmarks, copy and
+    # rename, scrollback, the Rust service's C side) took it to about
+    # 21,700 (decision D44).
+    "kernel_lines": 22500,
     "boot_seconds": 90,      # about 15 s locally; CI machines are slower
 }
 

@@ -11,3 +11,4 @@ debugcon.txt
 screen*.ppm
 screen*.png
 OVMF_VARS.fd
+user/services/*/target/

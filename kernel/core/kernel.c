@@ -17,6 +17,7 @@
 #include "bench.h"
 #include "fbcon.h"
 #include "splash.h"
+#include "rust_svc.h"
 #include "font.h"
 #include "acpi.h"
 #include "pci.h"
@@ -365,6 +366,7 @@ void kernel_main(void)
      * Browser), the extra shell commands and the network checks. */
     if (!net_init())
         kprintf("[net] no network card found; the network is off\n");
+    rust_svc_start();                  /* the Rust "hello" service, if built in */
     bool apps_ok = apps_run_tests();
     {
         /* How long from power-on until every check passed: on the splash,

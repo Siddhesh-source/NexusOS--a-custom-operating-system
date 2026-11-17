@@ -14,6 +14,8 @@
 #include "wm.h"
 #include "net.h"
 #include "crash.h"
+#include "rust_svc.h"
+#include "proc.h"
 #include "shell.h"
 #include "lineedit.h"
 #include "fs.h"
@@ -607,6 +609,41 @@ static void test_login_languages(void)
     login_set_language(LOGIN_HINDI);
 }
 
+/* ---- the Rust service ------------------------------------------------------------ */
+
+static void test_rust_service(void)
+{
+    st_section("Rust service");
+    char out[64];
+    size_t n = 0;
+    uint32_t by = 0;
+    if (!rust_svc_built()) {
+        kprintf("[test] this kernel was built without Rust: only the 'not built' answer is checked\n");
+        CHECK(rust_svc_call(RUST_SVC_GREET, NULL, 0, out, sizeof(out), &n, NULL) == RUST_SVC_ERR_NOT_BUILT,
+              "without Rust every request says the service is not built");
+        return;
+    }
+    int st = rust_svc_call(RUST_SVC_GREET, NULL, 0, out, sizeof(out) - 1, &n, &by);
+    out[st == RUST_SVC_OK ? n : 0] = '\0';
+    CHECK(st == RUST_SVC_OK && strcmp(out, "Namaste from Rust") == 0, "the Rust service answers a greeting");
+    CHECK(by != 0 && by != thread_current()->tid, "it answers from its own thread");
+    uint8_t crc[4];
+    st = rust_svc_call(RUST_SVC_CRC32, "123456789", 9, crc, sizeof(crc), &n, NULL);
+    uint32_t v = (uint32_t)crc[0] | ((uint32_t)crc[1] << 8) | ((uint32_t)crc[2] << 16) | ((uint32_t)crc[3] << 24);
+    CHECK(st == RUST_SVC_OK && n == 4 && v == 0xCBF43926u, "Rust computes the standard CRC-32 check value");
+    CHECK(rust_svc_call(99, NULL, 0, out, sizeof(out), &n, NULL) == RUST_SVC_ERR_BAD_OP,
+          "an unknown request is refused by the Rust code");
+    CHECK(rust_svc_call(RUST_SVC_GREET, NULL, 0, out, 4, &n, NULL) == RUST_SVC_ERR_TOO_SMALL,
+          "an answer that does not fit is refused, not cut");
+    CHECK(rust_svc_call(RUST_SVC_CRC32, NULL, 5, out, sizeof(out), &n, NULL) == RUST_SVC_ERR_BAD_ARGS
+          && rust_svc_call(RUST_SVC_CRC32, "x", RUST_SVC_IO_MAX + 1, out, sizeof(out), &n, NULL) == RUST_SVC_ERR_BAD_ARGS,
+          "missing or oversized requests are refused before they reach Rust");
+    unsigned good = 0;
+    for (unsigned i = 0; i < 100; i++)
+        good += rust_svc_call(RUST_SVC_CRC32, "123456789", 9, crc, sizeof(crc), &n, NULL) == RUST_SVC_OK;
+    CHECK(good == 100, "100 requests in a row are all answered");
+}
+
 /* ---- terminal scrollback and colours ------------------------------------------- */
 
 static void test_terminal_more(void)
@@ -721,6 +758,7 @@ bool apps_run_tests(void)
     st_begin();
     kprintf("\n[test] ===== Network and apps =====\n");
     test_net();
+    test_rust_service();
     test_shell_more();
     test_login_languages();
     type("tester\n");

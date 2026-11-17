@@ -148,6 +148,50 @@ DEFAULT_SMP = 4
 SMP = DEFAULT_SMP
 
 
+# ---- the optional Rust service ---------------------------------------------
+
+RUST_SERVICE = ROOT / "user" / "services" / "hello-rs" / "src" / "lib.rs"
+RUST_TARGET = "x86_64-unknown-none"
+RUST_LIB = BUILD_DIR / "libhello_rs.a"
+
+
+def find_rustc() -> str | None:
+    """rustc from BHARAT_RUSTC, the PATH, or rustup's usual home."""
+    p = os.environ.get("BHARAT_RUSTC")
+    if p and Path(p).exists():
+        return p
+    found = shutil.which("rustc")
+    if found:
+        return found
+    home = Path.home() / ".cargo" / "bin" / ("rustc.exe" if IS_WIN else "rustc")
+    return str(home) if home.exists() else None
+
+
+def build_rust() -> Path | None:
+    """Compile the no_std Rust service into a static library, or skip it
+    (with a message) when rustc or its bare-metal target is missing, so the
+    build still works with only Python, Clang, NASM and QEMU."""
+    if os.environ.get("BHARAT_NO_RUST"):
+        print("[rust] BHARAT_NO_RUST is set: building without the Rust service")
+        return None
+    rustc = find_rustc()
+    if rustc is None:
+        print("[rust] rustc not found: building without the Rust service (optional)")
+        return None
+    libdir = subprocess.run([rustc, "--print", "target-libdir", "--target", RUST_TARGET],
+                            capture_output=True, text=True)
+    if libdir.returncode != 0 or not Path(libdir.stdout.strip()).is_dir():
+        print(f"[rust] the {RUST_TARGET} target is not installed "
+              f"(rustup target add {RUST_TARGET}): building without the Rust service")
+        return None
+    run([rustc, "--edition", "2021", "--crate-type", "staticlib", "--crate-name", "hello_rs",
+         "--target", RUST_TARGET, "-C", "opt-level=2", "-C", "panic=abort",
+         "-C", "code-model=kernel", "-C", "relocation-model=static",
+         "-C", "force-frame-pointers=yes", "-o", str(RUST_LIB), str(RUST_SERVICE)])
+    ok("Built the Rust service (user/services/hello-rs)")
+    return RUST_LIB
+
+
 def build_kernel(fault_demo: str | None = None, bench: bool = False,
                  demo_auto: bool = False) -> Path:
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
@@ -156,6 +200,9 @@ def build_kernel(fault_demo: str | None = None, bench: bool = False,
     run([*nasm, str(ENTRY_ASM), "-o", str(entry_o)])
     objs = [entry_o]
     defines = [f"-DBHARAT_FAULT_DEMO_{fault_demo.upper()}"] if fault_demo else []
+    rust_lib = build_rust()
+    if rust_lib is not None:
+        defines.append("-DBHARAT_RUST")
     if bench:
         defines.append("-DBHARAT_BENCH")
     if demo_auto:
@@ -169,6 +216,8 @@ def build_kernel(fault_demo: str | None = None, bench: bool = False,
         # -i: files pulled in with incbin (the fonts) sit next to the .asm
         run([*nasm, "-i", str(src.parent) + os.sep, str(src), "-o", str(obj)])
         objs.append(obj)
+    if rust_lib is not None:
+        objs.append(rust_lib)          # an archive: only what is used is linked
     link_with_symbols(objs, defines)
     ok(f"Built {KERNEL_ELF}")
     return KERNEL_ELF
