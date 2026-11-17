@@ -109,3 +109,18 @@ char *strstr(const char *hay, const char *needle)
     }
     return NULL;
 }
+
+static int lower(int c)
+{
+    return c >= 'A' && c <= 'Z' ? c + 32 : c;
+}
+
+int strncasecmp(const char *a, const char *b, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        int ca = lower((unsigned char)a[i]), cb = lower((unsigned char)b[i]);
+        if (ca != cb || ca == 0)
+            return ca - cb;
+    }
+    return 0;
+}

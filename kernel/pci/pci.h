@@ -44,6 +44,10 @@ const struct pci_device *pci_find(uint16_t vendor, uint16_t device);
  * 0xFFFFFFFF for a function that does not exist. */
 uint32_t pci_config_read32(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t offset);
 
+/* Raw configuration-space write (drivers turn on memory access and bus
+ * mastering with it). */
+void pci_config_write32(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t offset, uint32_t v);
+
 /* Short English name of a class/subclass, e.g. "IDE controller". */
 const char *pci_class_name(uint8_t class_code, uint8_t subclass);
 
