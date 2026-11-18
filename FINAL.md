@@ -14,7 +14,9 @@ disagree on **order**, this file wins; for **designs**, UPDATES wins.
   scratch** (e1000 driver, ARP, IPv4, ICMP, UDP, DNS, TCP, HTTP), and
   three apps: **Browser**, **Player** (video) and **Code**; Files with
   Places and a disk bar; a terminal with Tab completion and 11 new
-  commands. **622 self-checks pass on every boot**, and the boot test
+  commands; then a second round added DHCP, `why slow`/`why crash`, a
+  Hindi and Marathi login and the first Rust service. **707 self-checks
+  pass on every boot**, and the boot test
   fetches a real web page from the PC over BharatOS's own TCP.
 
 ## 2. What "finished" means
